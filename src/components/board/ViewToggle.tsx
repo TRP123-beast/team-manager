@@ -1,4 +1,4 @@
-import { Columns3, List } from 'lucide-react'
+import { CalendarDays, Columns3, List } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { BoardView } from '@/lib/board-view'
 
@@ -8,17 +8,15 @@ interface ViewToggleProps {
 }
 
 /**
- * Two-option segmented control for switching between the kanban Board view
- * and the flat List view. Rendered in the Board page header.
+ * Three-option segmented control for switching between the kanban
+ * Board view, the flat List view, and the monthly Calendar view.
+ * Rendered in the Board page header.
  */
 export function ViewToggle({ value, onChange }: ViewToggleProps) {
   return (
     <div
       role="radiogroup"
       aria-label="Board view"
-      // Segmented control — track is bg-elevated; the active option
-      // floats above on bg-surface with a subtle drop-shadow so it
-      // reads like an inset tab.
       className="inline-flex h-9 items-center gap-0.5 rounded-md bg-[var(--bg-elevated)] p-0.5"
     >
       <ToggleButton
@@ -32,6 +30,12 @@ export function ViewToggle({ value, onChange }: ViewToggleProps) {
         label="List"
         active={value === 'list'}
         onClick={() => onChange('list')}
+      />
+      <ToggleButton
+        icon={CalendarDays}
+        label="Calendar"
+        active={value === 'calendar'}
+        onClick={() => onChange('calendar')}
       />
     </div>
   )

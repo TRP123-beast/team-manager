@@ -34,7 +34,16 @@ import {
   projectHasUnassignedTasks,
 } from '@/lib/project-members'
 import type { LayoutOutletContext } from '@/components/layout/Layout'
-import type { Priority, Task, TaskStatus } from '@/data/types'
+import type {
+  Priority,
+  Project,
+  Task,
+  TaskStatus,
+  TeamMember,
+} from '@/data/types'
+import { useTaskPanel } from '@/data/task-panel'
+import { CalendarView, type CalendarItem } from '@/components/CalendarView'
+import { isOverdue } from '@/lib/date-utils'
 
 const PRIORITY_BY_KEY: Record<string, Priority> = {
   '1': 'critical',
@@ -573,6 +582,12 @@ export function BoardView({ forcedProjectId }: BoardViewProps) {
             members={teamMembers}
           />
         </div>
+      ) : view === 'calendar' ? (
+        <BoardCalendarView
+          tasks={filteredTasks}
+          projectById={projectById}
+          memberById={memberById}
+        />
       ) : (
         <DndContext
           sensors={sensors}
@@ -737,6 +752,97 @@ function NoMatches({ onClear }: { onClear: () => void }) {
       >
         Clear filters
       </button>
+    </div>
+  )
+}
+
+// ── Calendar view ───────────────────────────────────────────────────────────
+
+/**
+ * Renders the currently-filtered task set as a monthly calendar plus
+ * a "No Due Date" sidebar for undated tasks. Clicks on tasks open the
+ * detail panel; clicks on empty day cells fire Quick Create (date
+ * pre-fill isn't wired yet — Layout's openCreateTask signature would
+ * need to accept a date argument first).
+ */
+function BoardCalendarView({
+  tasks,
+  projectById,
+  memberById,
+}: {
+  tasks: Task[]
+  projectById: Map<string, Project>
+  memberById: Map<string, TeamMember>
+}) {
+  const { openTask } = useTaskPanel()
+  const { openCreateTask } = useOutletContext<LayoutOutletContext>()
+
+  const dated = tasks.filter((t) => t.dueDate)
+  const undated = tasks.filter((t) => !t.dueDate)
+
+  const items = useMemo<CalendarItem[]>(
+    () =>
+      dated.map((t) => {
+        const project = projectById.get(t.projectId)
+        const assignee = t.assigneeId ? memberById.get(t.assigneeId) : undefined
+        return {
+          id: t.id,
+          title: t.title,
+          date: t.dueDate as string,
+          type: 'task',
+          priority: t.priority,
+          status: t.status,
+          assignee: assignee?.name ?? null,
+          projectId: t.projectId,
+          projectName: project?.name,
+          projectColor: project?.color,
+          done: t.status === 'done',
+          overdue: t.status !== 'done' && isOverdue(t.dueDate),
+        }
+      }),
+    [dated, projectById, memberById],
+  )
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto lg:flex-row">
+      <div className="min-w-0 flex-1">
+        <CalendarView
+          items={items}
+          onItemClick={(item) => openTask(item.id)}
+          onDateClick={() => openCreateTask()}
+          headerCaption={`${items.length} task${items.length === 1 ? '' : 's'}`}
+        />
+      </div>
+      {undated.length > 0 && (
+        <aside className="w-full shrink-0 lg:w-[220px]">
+          <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+              No due date ({undated.length})
+            </p>
+            <ul className="flex flex-col gap-1">
+              {undated.map((t) => (
+                <li key={t.id}>
+                  <button
+                    type="button"
+                    onClick={() => openTask(t.id)}
+                    title={t.title}
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-elevated)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-focus)]"
+                  >
+                    <span
+                      aria-hidden="true"
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{
+                        backgroundColor: `var(--priority-${t.priority})`,
+                      }}
+                    />
+                    <span className="truncate">{t.title}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </aside>
+      )}
     </div>
   )
 }

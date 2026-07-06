@@ -2,10 +2,20 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Link,
   Navigate,
+  useNavigate,
   useParams,
   useSearchParams,
 } from 'react-router-dom'
-import { Columns3, FileText, Plus, Settings } from 'lucide-react'
+import {
+  CalendarDays,
+  Columns3,
+  FileText,
+  List,
+  Plus,
+  Settings,
+} from 'lucide-react'
+import { CalendarView, type CalendarItem } from '@/components/CalendarView'
+import type { Meeting, TeamMember } from '@/data/types'
 import { toast } from 'sonner'
 import { BoardView } from '@/components/board/BoardView'
 import { Breadcrumb } from '@/components/Breadcrumb'
@@ -275,10 +285,10 @@ export default function ProjectDetailPage() {
         <BoardView forcedProjectId={projectId} />
       ) : (
         <div className="min-h-0 flex-1 space-y-6 overflow-y-auto">
-          <MeetingList
+          <MeetingsSection
             meetings={projectMeetings}
             members={teamMembers}
-            hrefForMeeting={(m) => `/projects/${projectId}/meetings/${m.id}`}
+            projectId={projectId ?? ''}
             recordingDates={recordingDateSet}
           />
           <RecordingsSection />
@@ -416,6 +426,142 @@ function TabButton({ active, onClick, icon: Icon, count, children }: TabButtonPr
           ({count})
         </span>
       )}
+    </button>
+  )
+}
+
+// ── Meetings section (list ↔ calendar toggle) ───────────────────────────────
+
+type MeetingsViewMode = 'list' | 'calendar'
+
+const MEETINGS_VIEW_KEY = 'team-manager.project-meetings-view'
+
+function loadMeetingsView(): MeetingsViewMode {
+  if (typeof window === 'undefined') return 'list'
+  try {
+    const raw = window.localStorage.getItem(MEETINGS_VIEW_KEY)
+    return raw === 'calendar' ? 'calendar' : 'list'
+  } catch {
+    return 'list'
+  }
+}
+
+function saveMeetingsView(view: MeetingsViewMode): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(MEETINGS_VIEW_KEY, view)
+  } catch {
+    // ignore
+  }
+}
+
+function MeetingsSection({
+  meetings,
+  members,
+  projectId,
+  recordingDates,
+}: {
+  meetings: Meeting[]
+  members: TeamMember[]
+  projectId: string
+  recordingDates: ReadonlySet<string>
+}) {
+  const navigate = useNavigate()
+  const [view, setViewState] = useState<MeetingsViewMode>(() =>
+    loadMeetingsView(),
+  )
+  const setView = (next: MeetingsViewMode) => {
+    setViewState(next)
+    saveMeetingsView(next)
+  }
+
+  const items = useMemo<CalendarItem[]>(
+    () =>
+      meetings.map((m) => {
+        const attendees = m.attendeeIds
+          .map((id) => members.find((mm) => mm.id === id)?.name)
+          .filter((n): n is string => Boolean(n))
+        return {
+          id: m.id,
+          title: m.title,
+          date: m.date,
+          type: 'meeting',
+          assignee: attendees.length > 0 ? attendees.join(', ') : null,
+          status: m.status,
+        }
+      }),
+    [meetings, members],
+  )
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-end">
+        <div
+          role="radiogroup"
+          aria-label="Meetings view"
+          className="inline-flex h-8 items-center gap-0.5 rounded-md bg-[var(--bg-elevated)] p-0.5"
+        >
+          <ViewToggleButton
+            icon={List}
+            label="List"
+            active={view === 'list'}
+            onClick={() => setView('list')}
+          />
+          <ViewToggleButton
+            icon={CalendarDays}
+            label="Calendar"
+            active={view === 'calendar'}
+            onClick={() => setView('calendar')}
+          />
+        </div>
+      </div>
+
+      {view === 'calendar' ? (
+        <CalendarView
+          items={items}
+          headerCaption={`${meetings.length} meeting${meetings.length === 1 ? '' : 's'}`}
+          onItemClick={(item) => navigate(`/projects/${projectId}/meetings/${item.id}`)}
+        />
+      ) : (
+        <MeetingList
+          meetings={meetings}
+          members={members}
+          hrefForMeeting={(m) => `/projects/${projectId}/meetings/${m.id}`}
+          recordingDates={recordingDates}
+        />
+      )}
+    </div>
+  )
+}
+
+function ViewToggleButton({
+  icon: Icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: typeof List
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      aria-label={`${label} view`}
+      title={`${label} view`}
+      onClick={onClick}
+      className={cn(
+        'inline-flex h-7 items-center gap-1.5 rounded px-2.5 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-focus)]',
+        active
+          ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-sm'
+          : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+      <span className="hidden sm:inline">{label}</span>
     </button>
   )
 }
