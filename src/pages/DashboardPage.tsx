@@ -12,11 +12,6 @@ import { CollapsibleSection } from '@/components/dashboard/CollapsibleSection'
 import { ProjectsGlance } from '@/components/dashboard/ProjectsGlance'
 import { RecentMeetings } from '@/components/dashboard/RecentMeetings'
 import { SummaryCard } from '@/components/dashboard/SummaryCard'
-import { WeekTimeline } from '@/components/dashboard/WeekTimeline'
-import {
-  NeedsAttention,
-  type AttentionItem,
-} from '@/components/dashboard/NeedsAttention'
 import {
   ActivityFeed,
   type ActivityFilter,
@@ -25,22 +20,18 @@ import { SkeletonCard, SkeletonLine } from '@/components/shared/Skeleton'
 import { useAuth } from '@/data/auth'
 import { useData } from '@/data/store'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
-import { STATUS_LABELS, type Task } from '@/data/types'
+import type { Task } from '@/data/types'
+import {
+  endOfWeek,
+  isInThisWeek,
+  isOverdue,
+  startOfWeek,
+} from '@/lib/date-utils'
 
 /** sessionStorage key that gates the one-time Google Sheets setup toast
  *  on Dashboard load. Cleared when the user opens a new browser tab. */
 const SHEETS_SETUP_TOAST_KEY = 'team-manager.sheets-setup-toast-shown'
-import {
-  daysBetween,
-  endOfWeek,
-  isInThisWeek,
-  isOverdue,
-  now,
-  startOfWeek,
-} from '@/lib/date-utils'
 
-const STALE_DAYS = 5
-const QUESTION_WINDOW_HOURS = 48
 const ACTIVITY_FEED_INITIAL = 30
 const ACTIVITY_FEED_PAGE = 30
 
@@ -108,10 +99,6 @@ export default function DashboardPage() {
   }, [isInitialLoading, sheetsConnected, syncError])
 
   const summary = useMemo(() => computeSummary(tasks), [tasks])
-  const attention = useMemo(
-    () => computeAttention(tasks, activities, projects, teamMembers),
-    [tasks, activities, projects, teamMembers],
-  )
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all')
   const [activityLimit, setActivityLimit] = useState(ACTIVITY_FEED_INITIAL)
 
@@ -149,7 +136,10 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="space-y-6 md:space-y-8">
+    // Uniform 24 px (space-y-6) between every section — no md: bump.
+    // With Needs Attention and This Week gone, the page reads as a
+    // clean scroll of Summary → Projects → Meetings → Activity.
+    <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold text-[var(--text-primary)]">Dashboard</h1>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
@@ -223,14 +213,6 @@ export default function DashboardPage() {
       </CollapsibleSection>
 
       <CollapsibleSection
-        id="week-timeline"
-        title="This Week"
-        subtitle="Tasks due each day, Mon–Sun."
-      >
-        <WeekTimeline tasks={tasks} members={teamMembers} />
-      </CollapsibleSection>
-
-      <CollapsibleSection
         id="recent-meetings"
         title="Recent Meetings"
         subtitle="The last three across every project."
@@ -246,13 +228,9 @@ export default function DashboardPage() {
         <RecentMeetings meetings={meetings} projects={projects} />
       </CollapsibleSection>
 
-      <CollapsibleSection id="needs-attention" title="Needs Attention">
-        <NeedsAttention items={attention} />
-      </CollapsibleSection>
-
       <CollapsibleSection
         id="activity"
-        title="This Week's Activity"
+        title="Activity"
         controls={
           <label className="inline-flex items-center gap-2 text-xs text-[var(--text-secondary)]">
             <span className="sr-only">Filter activity</span>
@@ -300,7 +278,7 @@ export default function DashboardPage() {
 
 function DashboardSkeleton() {
   return (
-    <div className="space-y-6 md:space-y-8">
+    <div className="space-y-6">
       <div>
         <SkeletonLine width="w-40" height="h-7" />
         <SkeletonLine width="w-72" height="h-3" className="mt-2" />
@@ -384,124 +362,4 @@ function computeSummary(tasks: Task[]): Summary {
     }
   }
   return { open, overdue, dueThisWeek, completedThisWeek }
-}
-
-function computeAttention(
-  tasks: Task[],
-  activities: import('@/data/types').Activity[],
-  projects: import('@/data/types').Project[],
-  members: import('@/data/types').TeamMember[],
-): AttentionItem[] {
-  const projectById = new Map(projects.map((p) => [p.id, p]))
-  const memberById = new Map(members.map((m) => [m.id, m]))
-  const taskById = new Map(tasks.map((t) => [t.id, t]))
-
-  // Pre-index latest status_change per task for stale detection.
-  const lastStatusChangeByTask = new Map<string, string>()
-  for (const a of activities) {
-    if (a.type !== 'status_change' || a.taskId === null) continue
-    const prev = lastStatusChangeByTask.get(a.taskId)
-    if (!prev || a.createdAt > prev) {
-      lastStatusChangeByTask.set(a.taskId, a.createdAt)
-    }
-  }
-
-  const items: AttentionItem[] = []
-
-  // 1. Overdue (red)
-  const overdueTasks = tasks
-    .filter((t) => t.status !== 'done' && isOverdue(t.dueDate))
-    .map((t) => ({ task: t, days: -daysBetween(t.dueDate!, now()) }))
-    .sort((a, b) => b.days - a.days)
-  for (const { task, days } of overdueTasks) {
-    items.push({
-      kind: 'overdue',
-      key: `overdue-${task.id}`,
-      taskId: task.id,
-      title: task.title,
-      project: projectById.get(task.projectId)?.name ?? 'Unknown project',
-      days,
-      assignee: task.assigneeId
-        ? memberById.get(task.assigneeId)?.name ?? null
-        : null,
-    })
-  }
-
-  // 2. Unassigned high/critical (orange)
-  const priorityRank: Record<string, number> = { critical: 0, high: 1 }
-  const unassigned = tasks
-    .filter(
-      (t) =>
-        t.status !== 'done' &&
-        t.assigneeId === null &&
-        (t.priority === 'critical' || t.priority === 'high'),
-    )
-    .sort(
-      (a, b) =>
-        (priorityRank[a.priority] ?? 9) - (priorityRank[b.priority] ?? 9) ||
-        b.createdAt.localeCompare(a.createdAt),
-    )
-  for (const task of unassigned) {
-    items.push({
-      kind: 'unassigned',
-      key: `unassigned-${task.id}`,
-      taskId: task.id,
-      title: task.title,
-      project: projectById.get(task.projectId)?.name ?? 'Unknown project',
-    })
-  }
-
-  // 3. Recent questions (blue) — comments explicitly labeled "question"
-  // that haven't been marked resolved, posted in the last 48 hours.
-  const refTime = now().getTime()
-  const questionComments = activities
-    .filter(
-      (a) =>
-        a.type === 'comment' &&
-        a.commentLabel === 'question' &&
-        a.resolved !== true &&
-        refTime - new Date(a.createdAt).getTime() <=
-          QUESTION_WINDOW_HOURS * 3_600_000,
-    )
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  for (const activity of questionComments) {
-    if (activity.taskId === null) continue
-    const task = taskById.get(activity.taskId)
-    if (!task) continue
-    items.push({
-      kind: 'question',
-      key: `question-${activity.id}`,
-      taskId: task.id,
-      title: task.title,
-      commenter: memberById.get(activity.actorId)?.name ?? 'Someone',
-      preview: stripMention(activity.content),
-    })
-  }
-
-  // 4. Stale (gray) — no status change in 5+ days, excluding Done.
-  const staleTasks = tasks
-    .filter((t) => t.status !== 'done')
-    .map((t) => {
-      const ref = lastStatusChangeByTask.get(t.id) ?? t.createdAt
-      return { task: t, days: daysBetween(ref, now()) }
-    })
-    .filter(({ days }) => days > STALE_DAYS)
-    .sort((a, b) => b.days - a.days)
-  for (const { task, days } of staleTasks) {
-    items.push({
-      kind: 'stale',
-      key: `stale-${task.id}`,
-      taskId: task.id,
-      title: task.title,
-      status: STATUS_LABELS[task.status],
-      days,
-    })
-  }
-
-  return items
-}
-
-/** Strip a leading "@Name" mention so the preview starts with the actual question. */
-function stripMention(text: string): string {
-  return text.replace(/^@[\w\s.-]+?[—,:]\s*/, '').replace(/^@\S+\s+/, '').trim()
 }

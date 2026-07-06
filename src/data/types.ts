@@ -139,8 +139,8 @@ export interface Activity {
   /** Who pinned it — used for the "Pinned by X" caption. */
   pinnedBy?: string | null
   /** Only relevant for `commentLabel === 'question'` — flips when the team
-   *  marks the question resolved. Unresolved questions surface on board
-   *  cards and the Dashboard's Needs Attention. */
+   *  marks the question resolved. Unresolved questions surface as a
+   *  small "❓ N" badge on board cards. */
   resolved?: boolean
 }
 
