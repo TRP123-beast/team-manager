@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import {
@@ -12,10 +12,6 @@ import { CollapsibleSection } from '@/components/dashboard/CollapsibleSection'
 import { ProjectsGlance } from '@/components/dashboard/ProjectsGlance'
 import { RecentMeetings } from '@/components/dashboard/RecentMeetings'
 import { SummaryCard } from '@/components/dashboard/SummaryCard'
-import {
-  ActivityFeed,
-  type ActivityFilter,
-} from '@/components/dashboard/ActivityFeed'
 import { SkeletonCard, SkeletonLine } from '@/components/shared/Skeleton'
 import { useAuth } from '@/data/auth'
 import { useData } from '@/data/store'
@@ -32,24 +28,12 @@ import {
  *  on Dashboard load. Cleared when the user opens a new browser tab. */
 const SHEETS_SETUP_TOAST_KEY = 'team-manager.sheets-setup-toast-shown'
 
-const ACTIVITY_FEED_INITIAL = 30
-const ACTIVITY_FEED_PAGE = 30
-
-const FILTER_OPTIONS: Array<{ value: ActivityFilter; label: string }> = [
-  { value: 'all', label: 'All activity' },
-  { value: 'status', label: 'Status changes' },
-  { value: 'comments', label: 'Comments' },
-  { value: 'assignments', label: 'Assignments' },
-]
-
 export default function DashboardPage() {
   useDocumentTitle('Dashboard')
   const { currentUser } = useAuth()
   const {
     tasks,
     projects,
-    activities,
-    teamMembers,
     meetings,
     isInitialLoading,
     syncError,
@@ -99,33 +83,6 @@ export default function DashboardPage() {
   }, [isInitialLoading, sheetsConnected, syncError])
 
   const summary = useMemo(() => computeSummary(tasks), [tasks])
-  const [activityFilter, setActivityFilter] = useState<ActivityFilter>('all')
-  const [activityLimit, setActivityLimit] = useState(ACTIVITY_FEED_INITIAL)
-
-  const sortedActivities = useMemo(
-    () =>
-      [...activities].sort((a, b) =>
-        b.createdAt.localeCompare(a.createdAt),
-      ),
-    [activities],
-  )
-  // The filter applies before pagination — picking "Comments" first then
-  // pressing "Load more" should reveal the next 30 comments, not be diluted
-  // by the 30 most-recent of any type.
-  const filteredActivities = useMemo(() => {
-    if (activityFilter === 'all') return sortedActivities
-    const allow: Record<Exclude<ActivityFilter, 'all'>, string> = {
-      status: 'status_change',
-      comments: 'comment',
-      assignments: 'assignment',
-    }
-    return sortedActivities.filter((a) => a.type === allow[activityFilter])
-  }, [sortedActivities, activityFilter])
-  const visibleActivities = useMemo(
-    () => filteredActivities.slice(0, activityLimit),
-    [filteredActivities, activityLimit],
-  )
-  const canLoadMore = filteredActivities.length > visibleActivities.length
 
   if (isInitialLoading) {
     return <DashboardSkeleton />
@@ -136,9 +93,9 @@ export default function DashboardPage() {
   }
 
   return (
-    // Uniform 24 px (space-y-6) between every section — no md: bump.
-    // With Needs Attention and This Week gone, the page reads as a
-    // clean scroll of Summary → Projects → Meetings → Activity.
+    // Uniform 24 px (space-y-6) between sections. With Needs Attention,
+    // This Week, and Activity all removed, the dashboard is now a
+    // short scan: Summary → Projects → Meetings.
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold text-[var(--text-primary)]">Dashboard</h1>
@@ -226,51 +183,6 @@ export default function DashboardPage() {
         }
       >
         <RecentMeetings meetings={meetings} projects={projects} />
-      </CollapsibleSection>
-
-      <CollapsibleSection
-        id="activity"
-        title="Activity"
-        controls={
-          <label className="inline-flex items-center gap-2 text-xs text-[var(--text-secondary)]">
-            <span className="sr-only">Filter activity</span>
-            <select
-              value={activityFilter}
-              onChange={(e) => {
-                setActivityFilter(e.target.value as ActivityFilter)
-                setActivityLimit(ACTIVITY_FEED_INITIAL)
-              }}
-              aria-label="Filter activity"
-              className="h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-input)] px-2 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-focus)]"
-            >
-              {FILTER_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        }
-      >
-        <ActivityFeed
-          activities={visibleActivities}
-          tasks={tasks}
-          projects={projects}
-          members={teamMembers}
-        />
-        {canLoadMore && (
-          <div className="mt-3 flex justify-center">
-            <button
-              type="button"
-              onClick={() =>
-                setActivityLimit((n) => n + ACTIVITY_FEED_PAGE)
-              }
-              className="inline-flex h-9 items-center justify-center rounded-md border border-[var(--border-default)] bg-transparent px-4 text-sm font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-elevated)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-focus)]"
-            >
-              Load more
-            </button>
-          </div>
-        )}
       </CollapsibleSection>
     </div>
   )
