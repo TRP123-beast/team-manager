@@ -1,15 +1,25 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { CheckCircle2, ListChecks, MessageSquare } from 'lucide-react'
+import { Link, useOutletContext } from 'react-router-dom'
+import {
+  CalendarDays,
+  CheckCircle2,
+  List,
+  ListChecks,
+  MessageSquare,
+} from 'lucide-react'
 import {
   TaskSection,
   type MyTaskEntry,
 } from '@/components/my-tasks/TaskSection'
+import { CalendarView, type CalendarItem } from '@/components/CalendarView'
 import { SkeletonCard, SkeletonLine } from '@/components/shared/Skeleton'
 import { useAuth } from '@/data/auth'
 import { useData } from '@/data/store'
+import { useTaskPanel } from '@/data/task-panel'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useScrollRestore } from '@/hooks/useScrollRestore'
+import type { LayoutOutletContext } from '@/components/layout/Layout'
+import { isOverdue } from '@/lib/date-utils'
 import {
   STATUS_LABELS,
   type Priority,
@@ -77,6 +87,29 @@ const STATUS_BADGE_VAR: Record<TaskStatus, string> = {
 }
 
 const FILTER_OWNER_KEY_SUFFIX = '__my'
+
+type MyTasksView = 'list' | 'calendar'
+const MY_TASKS_VIEW_KEY = 'team-manager.my-tasks-view'
+
+function loadMyTasksView(): MyTasksView {
+  if (typeof window === 'undefined') return 'list'
+  try {
+    return window.localStorage.getItem(MY_TASKS_VIEW_KEY) === 'calendar'
+      ? 'calendar'
+      : 'list'
+  } catch {
+    return 'list'
+  }
+}
+
+function saveMyTasksView(view: MyTasksView): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(MY_TASKS_VIEW_KEY, view)
+  } catch {
+    // ignore
+  }
+}
 
 export default function MyTasksPage() {
   useDocumentTitle('My Tasks')
@@ -178,17 +211,78 @@ export default function MyTasksPage() {
   const filterCount = activeFilterCount(filters)
   const anyFilterActive = filterCount > 0
 
+  const [view, setViewState] = useState<MyTasksView>(() => loadMyTasksView())
+  const setView = (next: MyTasksView) => {
+    setViewState(next)
+    saveMyTasksView(next)
+  }
+  const { openTask } = useTaskPanel()
+  const { openCreateTask } = useOutletContext<LayoutOutletContext>()
+
+  // Calendar mode consumes the same filtered set as the list view —
+  // mapped to CalendarItem[]. Tasks without a due date are surfaced
+  // in the "No due date" sidebar rendered inside the calendar view.
+  const calendarItems = useMemo<CalendarItem[]>(() => {
+    return filteredEntries
+      .filter((e) => e.task.dueDate)
+      .map((e) => {
+        const t = e.task
+        const project = projectById.get(t.projectId)
+        return {
+          id: t.id,
+          title: t.title,
+          date: t.dueDate as string,
+          type: 'task',
+          priority: t.priority,
+          status: STATUS_LABELS[t.status],
+          projectId: t.projectId,
+          projectName: project?.name,
+          projectColor: project?.color,
+          done: t.status === 'done',
+          overdue: t.status !== 'done' && isOverdue(t.dueDate),
+        }
+      })
+  }, [filteredEntries, projectById])
+  const undatedEntries = useMemo(
+    () => filteredEntries.filter((e) => !e.task.dueDate),
+    [filteredEntries],
+  )
+
   if (!currentUser) return null
   if (isInitialLoading) return <MyTasksSkeleton />
 
   const header = (
-    <header>
-      <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
-        My Tasks
-      </h1>
-      <p className="mt-1 text-sm text-[var(--text-secondary)]">
-        Your assigned tasks across all projects.
-      </p>
+    <header className="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
+          My Tasks
+        </h1>
+        <p className="mt-1 text-sm text-[var(--text-secondary)]">
+          Your assigned tasks across all projects.
+        </p>
+      </div>
+      {/* View toggle — only surfaces when there are tasks to switch
+          between. The empty-state under the header stays list-only. */}
+      {myTasks.length > 0 && (
+        <div
+          role="radiogroup"
+          aria-label="My Tasks view"
+          className="inline-flex h-8 shrink-0 items-center gap-0.5 rounded-md bg-[var(--bg-elevated)] p-0.5"
+        >
+          <ViewButton
+            icon={List}
+            label="List"
+            active={view === 'list'}
+            onClick={() => setView('list')}
+          />
+          <ViewButton
+            icon={CalendarDays}
+            label="Calendar"
+            active={view === 'calendar'}
+            onClick={() => setView('calendar')}
+          />
+        </div>
+      )}
     </header>
   )
 
@@ -221,6 +315,49 @@ export default function MyTasksPage() {
 
       {filteredEntries.length === 0 ? (
         <NoMatches onClear={clearFilters} />
+      ) : view === 'calendar' ? (
+        // Calendar mode — dated tasks land on the grid, undated ones
+        // surface in a "No due date (N)" sidebar so nothing hides.
+        <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
+          <div className="min-w-0 flex-1">
+            <CalendarView
+              items={calendarItems}
+              onItemClick={(item) => openTask(item.id)}
+              onDateClick={() => openCreateTask()}
+              headerCaption={`${calendarItems.length} task${calendarItems.length === 1 ? '' : 's'}`}
+            />
+          </div>
+          {undatedEntries.length > 0 && (
+            <aside className="w-full shrink-0 lg:w-[220px]">
+              <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                  No due date ({undatedEntries.length})
+                </p>
+                <ul className="flex flex-col gap-1">
+                  {undatedEntries.map(({ task }) => (
+                    <li key={task.id}>
+                      <button
+                        type="button"
+                        onClick={() => openTask(task.id)}
+                        title={task.title}
+                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-elevated)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-focus)]"
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="h-1.5 w-1.5 shrink-0 rounded-full"
+                          style={{
+                            backgroundColor: `var(--priority-${task.priority})`,
+                          }}
+                        />
+                        <span className="truncate">{task.title}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </aside>
+          )}
+        </div>
       ) : filters.sort === 'priority' ? (
         // Grouped-by-status view. Each section is collapsible; Done
         // starts collapsed so the active queue dominates the page.
@@ -252,6 +389,40 @@ export default function MyTasksPage() {
         />
       )}
     </div>
+  )
+}
+
+// ── View toggle button ──────────────────────────────────────────────────────
+
+function ViewButton({
+  icon: Icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: typeof List
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      aria-label={`${label} view`}
+      title={`${label} view`}
+      onClick={onClick}
+      className={cn(
+        'inline-flex h-7 items-center gap-1.5 rounded px-2.5 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-focus)]',
+        active
+          ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-sm'
+          : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+      <span className="hidden sm:inline">{label}</span>
+    </button>
   )
 }
 
