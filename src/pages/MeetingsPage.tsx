@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { CalendarRange, ChevronLeft, ChevronRight } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import {
+  CalendarDays,
+  CalendarRange,
+  ChevronLeft,
+  ChevronRight,
+  List,
+} from 'lucide-react'
+import { CalendarView, type CalendarItem } from '@/components/CalendarView'
 import { MeetingListRow } from '@/components/meetings/MeetingListRow'
 import { SkeletonLine } from '@/components/shared/Skeleton'
 import { useData } from '@/data/store'
@@ -8,6 +16,29 @@ import { useScrollRestore } from '@/hooks/useScrollRestore'
 import { now } from '@/lib/date-utils'
 import { cn } from '@/lib/utils'
 import type { Meeting, MeetingStatus } from '@/data/types'
+
+type MeetingsView = 'list' | 'calendar'
+const MEETINGS_VIEW_KEY = 'team-manager.meetings-view'
+
+function loadMeetingsView(): MeetingsView {
+  if (typeof window === 'undefined') return 'list'
+  try {
+    return window.localStorage.getItem(MEETINGS_VIEW_KEY) === 'calendar'
+      ? 'calendar'
+      : 'list'
+  } catch {
+    return 'list'
+  }
+}
+
+function saveMeetingsView(view: MeetingsView): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(MEETINGS_VIEW_KEY, view)
+  } catch {
+    // ignore
+  }
+}
 
 type StatusFilter = 'all' | MeetingStatus
 
@@ -95,6 +126,12 @@ export default function MeetingsPage() {
   const [customFrom, setCustomFrom] = useState<string>('')
   const [customTo, setCustomTo] = useState<string>('')
   const [page, setPage] = useState<number>(1)
+  const [view, setViewState] = useState<MeetingsView>(() => loadMeetingsView())
+  const setView = (next: MeetingsView) => {
+    setViewState(next)
+    saveMeetingsView(next)
+  }
+  const navigate = useNavigate()
 
   const projectById = useMemo(
     () => new Map(projects.map((p) => [p.id, p])),
@@ -146,6 +183,29 @@ export default function MeetingsPage() {
     setPage(1)
   }, [status, projectId, datePreset, customFrom, customTo])
 
+  // Calendar mode consumes the same filtered `visible` set the list
+  // mode paginates. Meeting chips carry the project's colour so a
+  // multi-project calendar reads at a glance; the chip title stays
+  // the meeting's own title (project is in the tooltip / popover).
+  const calendarItems = useMemo<CalendarItem[]>(
+    () =>
+      visible.map((m) => {
+        const project = projectById.get(m.projectId)
+        return {
+          id: m.id,
+          title: m.title,
+          date: m.date,
+          type: 'meeting',
+          status: m.status,
+          projectId: m.projectId,
+          projectName: project?.name,
+          projectColor: project?.color,
+          done: m.status === 'cancelled',
+        }
+      }),
+    [visible, projectById],
+  )
+
   const totalPages = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
   const safePage = Math.min(page, totalPages)
   const pageStart = (safePage - 1) * PAGE_SIZE
@@ -168,14 +228,36 @@ export default function MeetingsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
-          Meetings
-        </h1>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">
-          Every discussion across every project — open a row to see its notes,
-          decisions, and action items.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-[var(--text-primary)]">
+            Meetings
+          </h1>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+            Every discussion across every project — open a row to see its notes,
+            decisions, and action items.
+          </p>
+        </div>
+        {meetings.length > 0 && (
+          <div
+            role="radiogroup"
+            aria-label="Meetings view"
+            className="inline-flex h-8 shrink-0 items-center gap-0.5 rounded-md bg-[var(--bg-elevated)] p-0.5"
+          >
+            <MeetingsViewButton
+              icon={List}
+              label="List"
+              active={view === 'list'}
+              onClick={() => setView('list')}
+            />
+            <MeetingsViewButton
+              icon={CalendarDays}
+              label="Calendar"
+              active={view === 'calendar'}
+              onClick={() => setView('calendar')}
+            />
+          </div>
+        )}
       </header>
 
       {meetings.length === 0 ? (
@@ -316,6 +398,14 @@ export default function MeetingsPage() {
                 Try widening the date range or clearing the status filter.
               </p>
             </div>
+          ) : view === 'calendar' ? (
+            <CalendarView
+              items={calendarItems}
+              headerCaption={`${visible.length} meeting${visible.length === 1 ? '' : 's'}`}
+              onItemClick={(item) =>
+                navigate(`/projects/${item.projectId}/meetings/${item.id}`)
+              }
+            />
           ) : (
             <>
               <ul className="flex flex-col gap-2">
@@ -397,5 +487,39 @@ function EmptyState() {
         action items all live under the project they belong to.
       </p>
     </div>
+  )
+}
+
+// ── View toggle button ──────────────────────────────────────────────────────
+
+function MeetingsViewButton({
+  icon: Icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: typeof List
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      aria-label={`${label} view`}
+      title={`${label} view`}
+      onClick={onClick}
+      className={cn(
+        'inline-flex h-7 items-center gap-1.5 rounded px-2.5 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-focus)]',
+        active
+          ? 'bg-[var(--bg-surface)] text-[var(--text-primary)] shadow-sm'
+          : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]',
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+      <span className="hidden sm:inline">{label}</span>
+    </button>
   )
 }
