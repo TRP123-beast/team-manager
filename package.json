@@ -13,7 +13,8 @@
     "eslint": "eslint .",
     "preview": "vite preview",
     "start": "serve -s dist -l tcp://0.0.0.0:${PORT:-3000} --no-clipboard",
-    "setup-google-auth": "node scripts/setup-google-auth.mjs"
+    "setup-google-auth": "node scripts/setup-google-auth.mjs",
+    "atlas-sync": "node scripts/atlas-sync.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
