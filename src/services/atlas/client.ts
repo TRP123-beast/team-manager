@@ -174,8 +174,11 @@ export function fetchAtlasProjects(opts?: FetchOptions): Promise<AtlasProject[]>
   return atlasFetch<AtlasProject[]>('/projects', undefined, opts)
 }
 
+// Default is generous — the Atlas page renders the feed grouped by day
+// and users expect to scroll back weeks. Callers that want a tight
+// widget can still pass a small limit explicitly.
 export function fetchAtlasFeed(
-  limit = 20,
+  limit = 500,
   opts?: FetchOptions,
 ): Promise<AtlasFeedItem[]> {
   return atlasFetch<AtlasFeedItem[]>('/feed', { limit }, opts)

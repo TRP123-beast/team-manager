@@ -8,8 +8,8 @@
  *   - fetchTranscripts(limit?, offset?)  — one page of the list.
  *   - fetchTranscript(id)                — one full transcript.
  *   - fetchAllTranscripts()              — paginates until exhausted
- *                                          (capped at 1000 rows / 5
- *                                          pages to keep runaway
+ *                                          (capped at 10,000 rows /
+ *                                          50 pages to keep runaway
  *                                          servers from stalling us).
  *
  * Every call goes out with `Authorization: Basic <base64(user:pass)>`
@@ -34,7 +34,10 @@ import type {
 const REQUEST_TIMEOUT_MS = 15_000
 const DEFAULT_PAGE_SIZE = 50
 const ALL_PAGE_SIZE = 200
-const ALL_MAX_PAGES = 5
+// Ceiling on `fetchAllTranscripts` so a misbehaving server can't stall
+// a page load indefinitely. 50 pages × 200 rows = 10,000 transcripts —
+// well above the ~141 current count with plenty of headroom for growth.
+const ALL_MAX_PAGES = 50
 
 export class TranscriptStoreApiError extends Error {
   readonly status: number
@@ -217,9 +220,9 @@ export async function fetchTranscript(
 /**
  * Paginate through every transcript. Uses a larger page size (200)
  * than the single-page helper so we hit fewer round-trips, and caps
- * at 5 pages / 1000 rows to keep a misbehaving server from stalling
- * a page load. Callers that need more can call `fetchTranscripts`
- * directly and drive pagination themselves.
+ * at 50 pages / 10,000 rows to keep a misbehaving server from
+ * stalling a page load. Callers that need more can call
+ * `fetchTranscripts` directly and drive pagination themselves.
  */
 export async function fetchAllTranscripts(): Promise<TranscriptListItem[]> {
   const all: TranscriptListItem[] = []

@@ -23,12 +23,6 @@ import {
 import type { Meeting, Task } from './types'
 import type { TranscriptListItem } from '@/services/transcript-store-types'
 
-/** Window (days) of transcripts we hydrate detail for. Anything older
- *  than this stays in the list index but doesn't get pulled as a full
- *  meeting — keeps the initial load fast while still surfacing the
- *  active window (roughly last month of meetings). */
-const RECENT_WINDOW_DAYS = 30
-
 /** Fan-out cap on per-transcript detail fetches. Keeps concurrent
  *  connections bounded when the list index is dense. */
 const DETAIL_CONCURRENCY = 12
@@ -47,9 +41,9 @@ export interface TranscriptSnapshot {
 }
 
 /**
- * Fetch every transcript's list row, then hydrate the last
- * `RECENT_WINDOW_DAYS` days worth of full transcripts, then map them
- * to `Meeting` + `Task` shapes.
+ * Fetch every transcript's list row, hydrate the full detail for
+ * every summarised transcript (no date window — we pull the whole
+ * history), then map them to `Meeting` + `Task` shapes.
  *
  * Skips transcripts that haven't been summarised yet — they'd render
  * as meetings with empty notes / no decisions / no action items,
@@ -71,20 +65,15 @@ export async function loadFromTranscriptStore(): Promise<TranscriptSnapshot> {
     return { meetings: [], tasks: [], index: [], loadedAt: now, errors }
   }
 
-  // Filter to the recent, summarised window.
-  const cutoff = Date.now() - RECENT_WINDOW_DAYS * 86_400_000
-  const recent = index.filter((row) => {
-    if (!row.has_summary) return false
-    const created = Date.parse(row.created_at)
-    return Number.isFinite(created) && created >= cutoff
-  })
+  // Every summarised transcript is fair game — no date cutoff.
+  const summarised = index.filter((row) => row.has_summary)
 
   // Fan-out detail fetches in bounded batches so we don't hammer the
   // upstream with hundreds of concurrent requests.
   const meetings: Meeting[] = []
   const tasks: Task[] = []
-  for (let i = 0; i < recent.length; i += DETAIL_CONCURRENCY) {
-    const slice = recent.slice(i, i + DETAIL_CONCURRENCY)
+  for (let i = 0; i < summarised.length; i += DETAIL_CONCURRENCY) {
+    const slice = summarised.slice(i, i + DETAIL_CONCURRENCY)
     // Attach the source row to each promise so the settled result
     // carries enough context for a per-row error message. Wrapping
     // rejections into `{ ok: false }` sidesteps the discriminated-

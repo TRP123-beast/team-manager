@@ -129,10 +129,11 @@ const SYNC_ERROR_THRESHOLD = 3
 const CACHE_CLEANUP_STORAGE_KEY = 'team-manager.last-cache-cleanup'
 /** Interval between cleanup passes — daily. */
 const CACHE_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000
-/** Retain atlas_cache rows fetched within the last week; anything
+/** Retain atlas_cache rows fetched within the last 90 days; anything
  *  older gets purged (usually left over from a renamed project slug
- *  or a retired data source). */
-const CACHE_ATLAS_TTL_MS = 7 * 24 * 60 * 60 * 1000
+ *  or a retired data source). Matches the activities TTL so both
+ *  redundancy layers share a horizon. */
+const CACHE_ATLAS_TTL_MS = 90 * 24 * 60 * 60 * 1000
 /** Retain activities from the last 90 days; older rows aren't
  *  surfaced by the UI, so they're dead weight in the table. */
 const CACHE_ACTIVITIES_TTL_MS = 90 * 24 * 60 * 60 * 1000
