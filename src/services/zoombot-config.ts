@@ -1,24 +1,32 @@
 /**
- * ZoomBot endpoint resolution.
+ * ZoomBot endpoint + credential resolution.
+ *
+ * The service moved from `n8n.dsliked.work.gd` (open) to
+ * `bots.caimbrian.ai` (HTTP Basic Auth). Every REST call and the
+ * WebSocket now need `Authorization: Basic <base64(user:pass)>` —
+ * `getBasicAuthHeader()` is the single builder those call sites use.
  *
  * Lookup order (highest precedence wins):
- *   1. localStorage[zoombot_base_url] — runtime override, set from a
- *      future Settings panel without touching .env.
+ *   1. localStorage[zoombot_base_url] — runtime override, set from
+ *      Settings without touching .env.
  *   2. VITE_ZOOMBOT_URL — build-time default from .env.
- *   3. Hardcoded fallback `https://n8n.dsliked.work.gd`.
+ *   3. Hardcoded fallback `https://bots.caimbrian.ai`.
  *
  * `wsUrl` is derived from `baseUrl` so the two never drift — swap
- * `https://` → `wss://` (and `http://` → `ws://`). Anything else passes
- * through unchanged so a custom scheme (e.g. a future tailscale relay)
- * still works.
+ * `https://` → `wss://` (and `http://` → `ws://`). Custom schemes pass
+ * through unchanged.
  */
 
 const STORAGE_KEY = 'zoombot_base_url'
-const HARDCODED_FALLBACK = 'https://n8n.dsliked.work.gd'
+const USERNAME_STORAGE_KEY = 'zoombot_username'
+const PASSWORD_STORAGE_KEY = 'zoombot_password'
+const HARDCODED_FALLBACK = 'https://bots.caimbrian.ai'
 
 export interface ZoomBotConfig {
   baseUrl: string
   wsUrl: string
+  username: string
+  password: string
 }
 
 function readLocalStorageOverride(): string {
@@ -46,8 +54,16 @@ function toWebSocketUrl(httpUrl: string): string {
   if (httpUrl.startsWith('http://')) {
     return 'ws://' + httpUrl.slice('http://'.length)
   }
-  // Already a websocket scheme or something else — pass through.
   return httpUrl
+}
+
+function readLocalStorageOverrideByKey(key: string): string {
+  if (typeof window === 'undefined') return ''
+  try {
+    return window.localStorage.getItem(key)?.trim() ?? ''
+  } catch {
+    return ''
+  }
 }
 
 export function getZoomBotConfig(): ZoomBotConfig {
@@ -56,9 +72,48 @@ export function getZoomBotConfig(): ZoomBotConfig {
       readEnv('VITE_ZOOMBOT_URL') ||
       HARDCODED_FALLBACK,
   )
+  // Credentials follow the same override → env fallback order as the
+  // URL. Empty string means unconfigured; callers gate on
+  // `isZoomBotConfigured()` before making auth'd requests.
+  const username =
+    readLocalStorageOverrideByKey(USERNAME_STORAGE_KEY) ||
+    readEnv('VITE_ZOOMBOT_USERNAME')
+  const password =
+    readLocalStorageOverrideByKey(PASSWORD_STORAGE_KEY) ||
+    readEnv('VITE_ZOOMBOT_PASSWORD')
   return {
     baseUrl,
     wsUrl: toWebSocketUrl(baseUrl),
+    username,
+    password,
+  }
+}
+
+/**
+ * Persist runtime overrides for username / password. Pass `null` or
+ * an empty string for either to clear that override — the resolver
+ * falls back to the env value as usual. Basic Auth secrets in
+ * localStorage are a mild security tradeoff (they're readable by
+ * any JS on the page); the env-var path is preferred for production.
+ */
+export function setZoomBotCredentials(
+  username: string | null,
+  password: string | null,
+): void {
+  if (typeof window === 'undefined') return
+  try {
+    if (!username || !username.trim()) {
+      window.localStorage.removeItem(USERNAME_STORAGE_KEY)
+    } else {
+      window.localStorage.setItem(USERNAME_STORAGE_KEY, username.trim())
+    }
+    if (!password || !password.trim()) {
+      window.localStorage.removeItem(PASSWORD_STORAGE_KEY)
+    } else {
+      window.localStorage.setItem(PASSWORD_STORAGE_KEY, password.trim())
+    }
+  } catch {
+    // storage failure — silent
   }
 }
 
@@ -76,9 +131,28 @@ export function setZoomBotBaseUrl(url: string | null): void {
   }
 }
 
-/** True iff we have any URL to talk to, including the hardcoded
- *  fallback. Use this as the "is the integration usable" check before
- *  mounting components that depend on the WebSocket or REST endpoints. */
+/**
+ * Build the `Authorization` header value for every authenticated
+ * ZoomBot call. Returns an empty string when credentials aren't
+ * configured — callers should gate on `isZoomBotConfigured()` before
+ * making requests, so this is a defensive fallback rather than a
+ * primary path.
+ */
+export function getBasicAuthHeader(): string {
+  const { username, password } = getZoomBotConfig()
+  if (!username || !password) return ''
+  // `btoa` handles ASCII cleanly. Usernames/passwords with non-ASCII
+  // characters would need a UTF-8-aware encoder — flag if that ever
+  // becomes a real requirement.
+  return 'Basic ' + btoa(`${username}:${password}`)
+}
+
+/**
+ * True iff we have every piece needed to talk to the service: a base
+ * URL AND a username AND a password. The URL alone isn't enough
+ * anymore since the endpoint now rejects unauthenticated requests.
+ */
 export function isZoomBotConfigured(): boolean {
-  return Boolean(getZoomBotConfig().baseUrl)
+  const { baseUrl, username, password } = getZoomBotConfig()
+  return Boolean(baseUrl && username && password)
 }

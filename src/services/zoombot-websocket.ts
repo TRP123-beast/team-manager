@@ -49,6 +49,11 @@ class ZoomBotWebSocket {
   private intentionallyClosed: boolean = false
   /** Ref count for the acquire/release lifecycle. */
   private refCount: number = 0
+  /** True after a credentialed connect fails — the next attempt drops
+   *  the `user:pass@` prefix and relies on the browser to replay Basic
+   *  Auth credentials cached from prior REST calls. Sticky per socket
+   *  lifetime; cleared on a successful open. */
+  private authInUrlFailed: boolean = false
 
   // ── Lifecycle ──────────────────────────────────────────────────────
 
@@ -58,16 +63,34 @@ class ZoomBotWebSocket {
     if (typeof window === 'undefined') return
     if (this.ws && this.ws.readyState !== WebSocket.CLOSED) return
 
-    const { wsUrl } = getZoomBotConfig()
+    const { wsUrl, username, password } = getZoomBotConfig()
     if (!wsUrl) return
+
+    // Attempt 1 — embed Basic Auth credentials in the wss:// URL:
+    //   wss://user:pass@host/path
+    // Not every browser supports credentials in the WS URL (Chromium
+    // strips them, Firefox accepts). If the credentialed URL fails on
+    // open, `authInUrlFailed` sticks so the next `connect()` falls
+    // back to the bare URL and relies on cached Basic Auth from prior
+    // REST calls.
+    const useCredsInUrl =
+      !this.authInUrlFailed && Boolean(username) && Boolean(password)
+    const connectUrl = useCredsInUrl
+      ? wsUrl.replace(
+          /^(wss?:\/\/)/,
+          `$1${encodeURIComponent(username)}:${encodeURIComponent(password)}@`,
+        )
+      : wsUrl
 
     let ws: WebSocket
     try {
-      ws = new WebSocket(wsUrl)
+      ws = new WebSocket(connectUrl)
     } catch (err) {
       // Constructor can throw on bad URLs — schedule a backoff retry.
+      // If we tried a credentialed URL, drop back to bare on the retry.
       // eslint-disable-next-line no-console
       console.warn('[zoombot-ws] WebSocket constructor failed', err)
+      if (useCredsInUrl) this.authInUrlFailed = true
       this.scheduleReconnect()
       return
     }
@@ -101,6 +124,14 @@ class ZoomBotWebSocket {
 
     ws.addEventListener('close', () => {
       this.ws = null
+      // If this socket was the credentialed attempt and it never
+      // reached OPEN (`reconnectAttempts` didn't reset), assume the
+      // browser rejected creds in the URL and fall back to bare next
+      // time. `reconnectAttempts === 0` means the 'open' handler ran
+      // and cleared it; anything else means we failed before open.
+      if (useCredsInUrl && this.reconnectAttempts !== 0) {
+        this.authInUrlFailed = true
+      }
       this.notifyStatusChange()
       if (this.intentionallyClosed) return
       this.scheduleReconnect()

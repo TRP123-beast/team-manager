@@ -1,27 +1,33 @@
 /**
- * Read-only REST client for the ZoomBot service.
+ * REST client for the ZoomBot service.
  *
- * Three exported helpers:
+ * Every request carries an HTTP Basic auth header built from
+ * `getBasicAuthHeader()`. Endpoints:
  *
- *   - fetchBotState(): live `/api/state` snapshot of the session + every
- *     deployed bot. Use this for the initial render of a live meeting
- *     view before subscribing to WebSocket updates.
- *   - fetchRecordings(): every recording in the cache, newest first.
- *   - getRecordingUrl(path): returns a URL safe to drop into
- *     `<audio src={}>` / `<video src={}>`. The server supports HTTP Range
- *     requests so players can seek without proxying the bytes through us.
- *   - fetchTranscriptText(path): reads a transcript file as text.
+ *   - fetchBotState()                — GET /api/state
+ *   - fetchRecordings(type?)         — GET /api/recordings?type=audio|video
+ *                                       (transcripts are no longer served here)
+ *   - getRecordingUrl(path)          — plain URL for <audio>/<video>. The
+ *                                       browser reuses the Basic Auth
+ *                                       credentials it cached from any
+ *                                       preceding REST call.
+ *   - getAuthenticatedRecordingUrl() — object URL variant for cases
+ *                                       where the browser doesn't
+ *                                       replay cached credentials (some
+ *                                       Range requests, some CORS
+ *                                       preflights).
+ *   - deployBot / stopBot / stopAllBots / createBot / updateBot /
+ *     deleteBot                       — write endpoints, all authed.
+ *
+ * `fetchTranscriptText` was removed — transcripts moved out of
+ * ZoomBot into the store.
  *
  * Every fetch is bounded by a 10s timeout via AbortController. Network
  * failures throw with a human-readable message; the caller decides
  * whether to render an error state or retry.
- *
- * No write operations live here on purpose — deploy / stop / configure
- * endpoints exist on the server but are deliberately not wired so the
- * integration stays observably read-only until we explicitly opt in.
  */
 
-import { getZoomBotConfig } from './zoombot-config'
+import { getBasicAuthHeader, getZoomBotConfig } from './zoombot-config'
 import type { ZoomBotState, ZoomRecording } from './zoombot-types'
 
 const REQUEST_TIMEOUT_MS = 10_000
@@ -35,16 +41,38 @@ export class ZoomBotApiError extends Error {
   }
 }
 
+/** Merge the caller's headers with our default set (auth + JSON) so
+ *  every request goes out authenticated without repeating the boilerplate. */
+function buildHeaders(extra?: HeadersInit): HeadersInit {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+  const auth = getBasicAuthHeader()
+  if (auth) headers['Authorization'] = auth
+  if (extra) {
+    // Merge in whatever the caller passed. Callers rarely need this
+    // (all our current endpoints are JSON in / JSON out), but keeping
+    // the door open avoids reshaping the signature later.
+    Object.assign(headers, extra as Record<string, string>)
+  }
+  return headers
+}
+
 /**
- * Wraps `fetch` with a 10-second timeout and a uniform error shape.
- * Returns the raw Response — callers handle parsing so they can pick
- * `.json()` or `.text()` as appropriate.
+ * Wraps `fetch` with a 10-second timeout, auth headers, and a
+ * uniform error shape. Returns the raw Response — callers handle
+ * parsing so they can pick `.json()` / `.text()` / `.blob()` as
+ * appropriate.
  */
 async function timedFetch(url: string, init: RequestInit = {}): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   try {
-    const res = await fetch(url, { ...init, signal: controller.signal })
+    const res = await fetch(url, {
+      ...init,
+      headers: buildHeaders(init.headers),
+      signal: controller.signal,
+    })
     return res
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') {
@@ -84,10 +112,23 @@ export async function fetchBotState(): Promise<ZoomBotState> {
   }
 }
 
-/** Every recording in the cache, server-sorted newest-first. */
-export async function fetchRecordings(): Promise<ZoomRecording[]> {
+/**
+ * Every recording in the cache, server-sorted newest-first.
+ *
+ * Optional `type` narrows the list to a single media type — the
+ * server now only serves `'audio'` and `'video'` (transcripts moved
+ * off ZoomBot). Omitting the arg returns whatever the server
+ * defaults to; callers that care about a specific type should pass
+ * it explicitly.
+ */
+export async function fetchRecordings(
+  type?: 'audio' | 'video',
+): Promise<ZoomRecording[]> {
   const { baseUrl } = getZoomBotConfig()
-  const res = await timedFetch(`${baseUrl}/api/recordings`)
+  const url = type
+    ? `${baseUrl}/api/recordings?type=${encodeURIComponent(type)}`
+    : `${baseUrl}/api/recordings`
+  const res = await timedFetch(url)
   if (!res.ok) {
     throw new ZoomBotApiError(
       `Failed to fetch recordings list (HTTP ${res.status}).`,
@@ -105,8 +146,9 @@ export async function fetchRecordings(): Promise<ZoomRecording[]> {
       res.status,
     )
   }
-  // Accept either `[...]` directly or `{ files: [...] }` — the spec says
-  // a `files` array, but a future iteration might flatten the envelope.
+  // Accept either `[...]` directly or `{ files: [...] }` — the spec
+  // says a `files` array, but a future iteration might flatten the
+  // envelope.
   if (Array.isArray(payload)) return payload as ZoomRecording[]
   if (
     payload &&
@@ -122,9 +164,16 @@ export async function fetchRecordings(): Promise<ZoomRecording[]> {
 }
 
 /**
- * Build a URL that streams the file bytes. Suitable to assign directly
- * to `<audio src>`, `<video src>`, or `<a href download>` because the
- * server honors HTTP Range — players seek without proxying through JS.
+ * Plain URL for streaming a recording's bytes. Suitable to assign
+ * directly to `<audio src>` / `<video src>` / `<a href download>`
+ * IF the browser has previously made an authenticated request to the
+ * same origin and cached the Basic Auth credentials — otherwise the
+ * server will 401 the media request.
+ *
+ * When you can't guarantee cached credentials (fresh session, iframe
+ * boundary, a Range request the browser doesn't attach creds to),
+ * use `getAuthenticatedRecordingUrl` below to fetch as a blob and
+ * hand back an object URL.
  */
 export function getRecordingUrl(path: string): string {
   const { baseUrl } = getZoomBotConfig()
@@ -132,36 +181,35 @@ export function getRecordingUrl(path: string): string {
 }
 
 /**
- * Fetch a recording (typically a transcript) as plain text. Same
- * endpoint as `getRecordingUrl` — for binary media use the URL directly
- * in a media element instead so the browser streams it.
+ * Auth-safe variant of `getRecordingUrl`: fetches the recording
+ * bytes with the Basic Auth header attached, then returns an object
+ * URL that the browser can play back without needing to re-auth.
+ *
+ * Callers should `URL.revokeObjectURL(returnedUrl)` when the media
+ * element unmounts — otherwise the blob stays pinned in memory.
  */
-export async function fetchTranscriptText(path: string): Promise<string> {
+export async function getAuthenticatedRecordingUrl(
+  path: string,
+): Promise<string> {
   const url = getRecordingUrl(path)
   const res = await timedFetch(url)
   if (!res.ok) {
     throw new ZoomBotApiError(
-      `Failed to fetch transcript (HTTP ${res.status}): ${path}`,
+      `Failed to fetch recording (HTTP ${res.status}): ${path}`,
       res.status,
     )
   }
-  return res.text()
+  const blob = await res.blob()
+  return URL.createObjectURL(blob)
 }
 
 // ── Write operations ────────────────────────────────────────────────────
-//
-// All write endpoints use the same `timedFetch` so the 10-second AbortController
-// budget and network-error normalisation are shared. Success returns void; the
-// caller relies on the WebSocket (`botStatus` / `deployed` / `botsUpdated`)
-// to refresh state, with an optional `pollState()` from the context as a
-// belt-and-braces fallback when the socket is closed.
 
 /** POST /api/bots/:id/deploy — start (or restart) a configured bot. */
 export async function deployBot(botId: number): Promise<void> {
   const { baseUrl } = getZoomBotConfig()
   const res = await timedFetch(`${baseUrl}/api/bots/${botId}/deploy`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
   })
   if (!res.ok) {
     throw new ZoomBotApiError(
@@ -176,7 +224,6 @@ export async function stopBot(botId: number): Promise<void> {
   const { baseUrl } = getZoomBotConfig()
   const res = await timedFetch(`${baseUrl}/api/bots/${botId}/stop`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
   })
   if (!res.ok) {
     throw new ZoomBotApiError(
@@ -191,7 +238,6 @@ export async function stopAllBots(): Promise<void> {
   const { baseUrl } = getZoomBotConfig()
   const res = await timedFetch(`${baseUrl}/api/stop`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
   })
   if (!res.ok) {
     throw new ZoomBotApiError(
@@ -206,7 +252,6 @@ export async function createBot(name: string, target: string): Promise<void> {
   const { baseUrl } = getZoomBotConfig()
   const res = await timedFetch(`${baseUrl}/api/bots`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, target }),
   })
   if (!res.ok) {
@@ -226,7 +271,6 @@ export async function updateBot(
   const { baseUrl } = getZoomBotConfig()
   const res = await timedFetch(`${baseUrl}/api/bots/${botId}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, target }),
   })
   if (!res.ok) {

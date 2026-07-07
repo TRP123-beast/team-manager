@@ -27,12 +27,14 @@ import {
   XCircle,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { Eye, EyeOff } from 'lucide-react'
 import { useZoomBot } from '@/hooks/useZoomBot'
 import { fetchBotState } from '@/services/zoombot-api'
 import {
   getZoomBotConfig,
   isZoomBotConfigured,
   setZoomBotBaseUrl,
+  setZoomBotCredentials,
 } from '@/services/zoombot-config'
 import { zoomBotWS } from '@/services/zoombot-websocket'
 import { formatBytes } from '@/lib/recordings-grouping'
@@ -67,10 +69,15 @@ export function ZoomBotSection() {
     isReconnecting: wsReconnecting,
   } = useZoomBot()
 
-  // ── URL config + connection-test state ─────────────────────────────
+  // ── URL + credentials config + connection-test state ───────────────
   const config = useMemo(() => getZoomBotConfig(), [])
   const [urlDraft, setUrlDraft] = useState<string>(config.baseUrl)
   const [savedUrl, setSavedUrl] = useState<string>(config.baseUrl)
+  const [usernameDraft, setUsernameDraft] = useState<string>(config.username)
+  const [passwordDraft, setPasswordDraft] = useState<string>(config.password)
+  const [savedUsername, setSavedUsername] = useState<string>(config.username)
+  const [savedPassword, setSavedPassword] = useState<string>(config.password)
+  const [revealPassword, setRevealPassword] = useState<boolean>(false)
   const [testing, setTesting] = useState<boolean>(false)
   const [status, setStatus] = useState<ConnectionStatus>(
     isZoomBotConfigured() ? 'unknown' : 'unconfigured',
@@ -139,8 +146,14 @@ export function ZoomBotSection() {
       )
       setStatus('connected')
     } catch (err) {
+      // Surface 401 specifically — most common failure now that the
+      // endpoint requires Basic Auth.
+      const message = err instanceof Error ? err.message : String(err)
+      const is401 = /\b401\b/.test(message)
       toast.error(
-        `Connection failed: ${err instanceof Error ? err.message : String(err)}`,
+        is401
+          ? 'Authentication failed. Check the username and password.'
+          : `Connection failed: ${message}`,
       )
       setStatus('unreachable')
     } finally {
@@ -149,22 +162,30 @@ export function ZoomBotSection() {
   }
 
   const handleSave = () => {
-    const trimmed = urlDraft.trim()
-    if (!trimmed) {
+    const trimmedUrl = urlDraft.trim()
+    const trimmedUsername = usernameDraft.trim()
+    const trimmedPassword = passwordDraft.trim()
+
+    // URL: empty clears the override; anything else stores it.
+    if (!trimmedUrl) {
       setZoomBotBaseUrl(null)
-      setSavedUrl(getZoomBotConfig().baseUrl)
-      setStatus(isZoomBotConfigured() ? 'unknown' : 'unconfigured')
-      toast.success('URL cleared — using the env / hardcoded default.')
-      return
+    } else {
+      setZoomBotBaseUrl(trimmedUrl)
     }
-    setZoomBotBaseUrl(trimmed)
-    setSavedUrl(trimmed)
-    setStatus('unknown')
-    toast.success('ZoomBot URL saved.')
-    // The existing WebSocket (if any) won't pick up the new URL until
-    // its next reconnect. Tear it down so the meeting-detection
-    // poller's next /api/state hit uses the fresh URL and decides
-    // whether to reopen against it.
+    // Credentials: same clear-vs-set semantics, applied together.
+    setZoomBotCredentials(
+      trimmedUsername || null,
+      trimmedPassword || null,
+    )
+    const resolved = getZoomBotConfig()
+    setSavedUrl(resolved.baseUrl)
+    setSavedUsername(resolved.username)
+    setSavedPassword(resolved.password)
+    setStatus(isZoomBotConfigured() ? 'unknown' : 'unconfigured')
+    toast.success('ZoomBot config saved.')
+    // The existing WebSocket (if any) won't pick up the new URL /
+    // credentials until its next reconnect. Tear it down so the
+    // meeting-detection poller reopens with the fresh values.
     try {
       zoomBotWS.disconnect()
     } catch {
@@ -179,9 +200,12 @@ export function ZoomBotSection() {
 
   // Status badge tone is derived from a small priority chain so a
   // successful test outranks "unconfigured" (which only fires when we
-  // genuinely don't have a URL anywhere — including the hardcoded
-  // fallback in zoombot-config.ts).
-  const dirty = urlDraft.trim() !== savedUrl
+  // genuinely don't have all three of URL / username / password —
+  // including the hardcoded URL fallback in zoombot-config.ts).
+  const dirty =
+    urlDraft.trim() !== savedUrl ||
+    usernameDraft.trim() !== savedUsername ||
+    passwordDraft.trim() !== savedPassword
 
   return (
     <section aria-labelledby="zoombot-heading">
@@ -191,15 +215,17 @@ export function ZoomBotSection() {
           className="inline-flex items-center gap-2 text-lg font-semibold text-[var(--text-primary)]"
         >
           <Headphones className="h-4 w-4" aria-hidden="true" />
-          Meeting Recordings — ZoomBot
+          ZoomBot — Live Meetings & Recordings
         </h2>
         <StatusBadge status={status} />
       </div>
 
       <p className="mt-1 text-sm text-[var(--text-secondary)]">
-        Live transcription, audio, video, and screen-share captures from
-        ZoomBot. The integration is read-only on the team-manager side —
-        recordings flow in from the bot service.
+        Audio, video, live captions, and transcripts/summaries all come
+        from <code className="font-mono">bots.caimbrian.ai</code> and
+        share one set of HTTP Basic Auth credentials. The Transcripts
+        section below reports what's available on{' '}
+        <code className="font-mono">/api/transcripts</code>.
       </p>
 
       {/* ── Connection config ─────────────────────────────────────── */}
@@ -216,7 +242,7 @@ export function ZoomBotSection() {
             type="text"
             value={urlDraft}
             onChange={(e) => setUrlDraft(e.target.value)}
-            placeholder="https://n8n.dsliked.work.gd"
+            placeholder="https://bots.caimbrian.ai"
             spellCheck={false}
             autoComplete="off"
             className="mt-1 h-9 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-input)] px-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-focus)]"
@@ -225,6 +251,70 @@ export function ZoomBotSection() {
             Defaults to <code className="font-mono">VITE_ZOOMBOT_URL</code> /
             the hardcoded fallback. Saving stores a per-browser override.
           </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div>
+            <label
+              htmlFor="zoombot-username"
+              className="block text-[11px] font-semibold uppercase tracking-[0.5px] text-[var(--text-secondary)]"
+            >
+              Username
+            </label>
+            <input
+              id="zoombot-username"
+              type="text"
+              value={usernameDraft}
+              onChange={(e) => setUsernameDraft(e.target.value)}
+              placeholder="Basic Auth username"
+              spellCheck={false}
+              autoComplete="username"
+              className="mt-1 h-9 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-input)] px-3 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-focus)]"
+            />
+            <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+              Falls back to{' '}
+              <code className="font-mono">VITE_ZOOMBOT_USERNAME</code>.
+            </p>
+          </div>
+
+          <div>
+            <label
+              htmlFor="zoombot-password"
+              className="block text-[11px] font-semibold uppercase tracking-[0.5px] text-[var(--text-secondary)]"
+            >
+              Password
+            </label>
+            <div className="relative mt-1">
+              <input
+                id="zoombot-password"
+                type={revealPassword ? 'text' : 'password'}
+                value={passwordDraft}
+                onChange={(e) => setPasswordDraft(e.target.value)}
+                placeholder="Basic Auth password"
+                spellCheck={false}
+                autoComplete="current-password"
+                className="h-9 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--bg-input)] pl-3 pr-10 text-sm text-[var(--text-primary)] outline-none focus:border-[var(--accent-primary)] focus:ring-2 focus:ring-[var(--accent-focus)]"
+              />
+              <button
+                type="button"
+                onClick={() => setRevealPassword((r) => !r)}
+                aria-label={revealPassword ? 'Hide password' : 'Show password'}
+                className="absolute inset-y-0 right-0 inline-flex w-9 items-center justify-center rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-focus)]"
+              >
+                {revealPassword ? (
+                  <EyeOff className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <Eye className="h-4 w-4" aria-hidden="true" />
+                )}
+              </button>
+            </div>
+            <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+              Falls back to{' '}
+              <code className="font-mono">VITE_ZOOMBOT_PASSWORD</code>. Basic
+              Auth secrets in localStorage are readable by any JS on the page
+              — env vars are preferred for production.
+            </p>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 pt-1">
