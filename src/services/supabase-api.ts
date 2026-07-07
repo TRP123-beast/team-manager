@@ -197,6 +197,25 @@ export interface SettingRow {
   updated_at?: string
 }
 
+/**
+ * Row shape for the `atlas_cache` table — used as a redundancy layer
+ * for source-of-truth data pulled from Atlas, Sheets, and the
+ * Transcript Store. Each row is a snapshot keyed by project slug (or
+ * a reserved slug like `"transcripts"` for the transcript-store
+ * global cache). If the upstream is unreachable, the app falls back
+ * to whatever's in this table.
+ *
+ * `tasks` / `manifests` / `activity` are JSONB blobs so callers can
+ * shove whatever shape they want in and interpret it on read.
+ */
+export interface AtlasCacheRow {
+  project_slug: string
+  tasks?: unknown
+  manifests?: unknown
+  activity?: unknown
+  fetched_at?: string
+}
+
 export interface DedupLogRow {
   id?: string
   primary_task_id: string
@@ -754,6 +773,148 @@ export async function getAllSettings(): Promise<Record<string, unknown>> {
   } catch (err) {
     logError('getAllSettings', err)
     return {}
+  }
+}
+
+// ── Atlas Cache ─────────────────────────────────────────────────────────────
+
+/**
+ * Upsert a snapshot into the `atlas_cache` table. Called by each
+ * source loader (Atlas, Sheets, Transcript Store) after a successful
+ * fetch, so if the upstream goes down we can serve last-known data
+ * from Supabase on the next boot.
+ *
+ * Conflict key is `project_slug`; passing an existing slug overwrites
+ * the previous snapshot. `fetched_at` is stamped server-side if not
+ * supplied.
+ */
+export async function upsertAtlasCache(row: AtlasCacheRow): Promise<void> {
+  const c = client()
+  if (!c) return
+  try {
+    const payload = {
+      ...row,
+      fetched_at: row.fetched_at ?? new Date().toISOString(),
+    }
+    const { error } = await c
+      .from('atlas_cache')
+      .upsert(payload, { onConflict: 'project_slug' })
+    if (error) throw error
+  } catch (err) {
+    logError('upsertAtlasCache', err)
+  }
+}
+
+/**
+ * Delete every `atlas_cache` row whose `fetched_at` is older than
+ * `cutoffIso`. Called by the daily cleanup task so stale snapshots
+ * don't pile up when a project slug gets renamed or a data source
+ * gets retired. Fire-and-forget — logs on failure, never throws.
+ */
+export async function deleteStaleAtlasCache(cutoffIso: string): Promise<void> {
+  const c = client()
+  if (!c) return
+  try {
+    const { error } = await c
+      .from('atlas_cache')
+      .delete()
+      .lt('fetched_at', cutoffIso)
+    if (error) throw error
+  } catch (err) {
+    logError('deleteStaleAtlasCache', err)
+  }
+}
+
+/**
+ * Delete every `activities` row whose `created_at` is older than
+ * `cutoffIso`. The activity feed only surfaces recent rows, so
+ * anything past the retention window is dead weight in the table.
+ */
+export async function deleteOldActivities(cutoffIso: string): Promise<void> {
+  const c = client()
+  if (!c) return
+  try {
+    const { error } = await c
+      .from('activities')
+      .delete()
+      .lt('created_at', cutoffIso)
+    if (error) throw error
+  } catch (err) {
+    logError('deleteOldActivities', err)
+  }
+}
+
+/**
+ * Aggregate stats for the Settings panel — count of cached slugs
+ * and the most-recent `fetched_at` across all rows. Returns `null`
+ * when Supabase isn't configured.
+ */
+export async function getAtlasCacheStats(): Promise<{
+  count: number
+  latestFetchedAt: string | null
+} | null> {
+  const c = client()
+  if (!c) return null
+  try {
+    const { data, error, count } = await c
+      .from('atlas_cache')
+      .select('fetched_at', { count: 'exact' })
+      .order('fetched_at', { ascending: false })
+      .limit(1)
+    if (error) throw error
+    const rows = (data ?? []) as Array<{ fetched_at: string | null }>
+    return {
+      count: count ?? rows.length,
+      latestFetchedAt: rows[0]?.fetched_at ?? null,
+    }
+  } catch (err) {
+    logError('getAtlasCacheStats', err)
+    return null
+  }
+}
+
+/**
+ * Wipe every row from `atlas_cache`. PM-only action from the
+ * Settings panel — the next background load will re-populate.
+ */
+export async function clearAtlasCache(): Promise<void> {
+  const c = client()
+  if (!c) return
+  try {
+    // Passing a non-matching filter is Supabase's canonical "delete
+    // everything" pattern; a bare `.delete()` without a filter is
+    // rejected by RLS.
+    const { error } = await c
+      .from('atlas_cache')
+      .delete()
+      .not('project_slug', 'is', null)
+    if (error) throw error
+  } catch (err) {
+    logError('clearAtlasCache', err)
+  }
+}
+
+/**
+ * Fetch a single `atlas_cache` row by slug. Returns `null` when the
+ * slug isn't cached yet (or Supabase isn't configured). Callers use
+ * this as a fallback when a live source fetch fails.
+ */
+export async function getAtlasCache(
+  slug: string,
+): Promise<AtlasCacheRow | null> {
+  const c = client()
+  if (!c) return null
+  try {
+    const { data, error } = await c
+      .from('atlas_cache')
+      .select('*')
+      .eq('project_slug', slug)
+      .maybeSingle()
+    if (error) throw error
+    return (data ?? null) as AtlasCacheRow | null
+  } catch (err) {
+    logError('getAtlasCache', err)
+    return null
   }
 }
 

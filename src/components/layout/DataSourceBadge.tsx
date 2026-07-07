@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useData } from '@/data/store'
+import { isAtlasConfigured } from '@/services/atlas/config'
 import {
   getRefreshTelemetry,
   hasRefreshTokenOverride,
 } from '@/services/google-sheets-auth'
+import { isGoogleSheetsConfigured } from '@/services/google-sheets-config'
+import { isTranscriptStoreConfigured } from '@/services/transcript-store-config'
 import { cn } from '@/lib/utils'
 
 /**
@@ -100,20 +103,56 @@ export function DataSourceBadge() {
     return atlasProjectIds.size
   }, [projectDataSources])
 
+  // Per-source status glyph — one line per source, showing whether
+  // it's configured and (best-effort) whether it looks healthy. We
+  // don't yet track per-source fetch failures at the store level, so
+  // the "live" verdict for Atlas + Sheets falls back to their
+  // existing signals (dataSource / sheetsConnected). The transcript
+  // store just reports configured/unconfigured until per-source
+  // state lands.
+  const sourceStatus = (() => {
+    const atlasConfigured = isAtlasConfigured()
+    const transcriptConfigured = isTranscriptStoreConfigured()
+    const sheetsConfigured = isGoogleSheetsConfigured()
+    const atlas = !atlasConfigured
+      ? 'off'
+      : atlasActive
+        ? 'live'
+        : 'down'
+    const transcripts = !transcriptConfigured ? 'off' : 'configured'
+    const sheets = !sheetsConfigured
+      ? 'off'
+      : sheetsActive
+        ? 'live'
+        : sheetsAuthError
+          ? 'auth-error'
+          : 'down'
+    const glyph = (s: string) =>
+      s === 'live' || s === 'configured'
+        ? '✓'
+        : s === 'off'
+          ? '—'
+          : s === 'auth-error'
+            ? '⚠'
+            : '✗'
+    return `Atlas: ${glyph(atlas)} · Transcripts: ${glyph(transcripts)} · Sheets: ${glyph(sheets)}`
+  })()
+
   const tooltip = (() => {
     if (tone === 'sheets_auth') {
-      return 'Google Sheets authentication failed. An admin needs to re-authorize.'
+      return `Google Sheets authentication failed. An admin needs to re-authorize.\n${sourceStatus}`
     }
     if (tone === 'rotated') {
-      return 'Google issued a new refresh token. Update .env to persist this change.'
+      return `Google issued a new refresh token. Update .env to persist this change.\n${sourceStatus}`
     }
     if (tone === 'error') {
-      return `Sync error: ${syncError ?? 'unknown'} — click to open Settings`
+      return `Sync error: ${syncError ?? 'unknown'} — click to open Settings\n${sourceStatus}`
     }
     if (tone === 'mock') {
-      return 'Using demo data. Configure Atlas or Google Sheets in Settings to connect live data.'
+      return `Using demo data. Configure Atlas, Transcripts, or Google Sheets in Settings to connect live data.\n${sourceStatus}`
     }
-    // Live: combine whichever sources are active into a single line.
+    // Live: combine whichever sources are active into a single line,
+    // then append the per-source glyph line for at-a-glance status.
     const parts: string[] = []
     if (atlasActive) {
       parts.push(
@@ -128,7 +167,7 @@ export function DataSourceBadge() {
     if (parts.length === 0) {
       parts.push(`${projects.length} project${projects.length === 1 ? '' : 's'}, ${tasks.length} task${tasks.length === 1 ? '' : 's'}`)
     }
-    return `${parts.join(' · ')} · Last synced ${relativeAgo(lastSynced)}`
+    return `${parts.join(' · ')} · Last synced ${relativeAgo(lastSynced)}\n${sourceStatus}`
   })()
 
   // Anything actionable routes to Settings; the rotated state is also

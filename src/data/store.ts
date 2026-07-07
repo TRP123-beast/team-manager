@@ -49,12 +49,20 @@ import {
   meetingToRows,
   syncOverlayDiff,
 } from './supabase-sync'
+import {
+  loadFromTranscriptStore,
+  mergeAtlasAndTranscriptMeetings,
+} from './transcripts-bridge'
+import { isTranscriptStoreConfigured } from '@/services/transcript-store-config'
 import { isSupabaseConfigured } from '@/services/supabase'
 import {
   deleteActivity as deleteActivityApi,
   deleteComment as deleteCommentApi,
+  deleteOldActivities,
+  deleteStaleAtlasCache,
   recordDedupDecision,
   setSetting,
+  upsertAtlasCache,
   upsertMeeting,
 } from '@/services/supabase-api'
 import { findBestMatch } from '@/services/deduplication'
@@ -114,6 +122,20 @@ const MUTATION_DELAY_MS = 800
  *  "Sync error" indicator until this many refreshes have failed
  *  in a row. Any successful load resets the counter. */
 const SYNC_ERROR_THRESHOLD = 3
+
+/** localStorage key holding the millisecond timestamp of the last
+ *  successful Supabase cleanup pass. Used to throttle cleanup to
+ *  once per calendar day per browser. */
+const CACHE_CLEANUP_STORAGE_KEY = 'team-manager.last-cache-cleanup'
+/** Interval between cleanup passes — daily. */
+const CACHE_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000
+/** Retain atlas_cache rows fetched within the last week; anything
+ *  older gets purged (usually left over from a renamed project slug
+ *  or a retired data source). */
+const CACHE_ATLAS_TTL_MS = 7 * 24 * 60 * 60 * 1000
+/** Retain activities from the last 90 days; older rows aren't
+ *  surfaced by the UI, so they're dead weight in the table. */
+const CACHE_ACTIVITIES_TTL_MS = 90 * 24 * 60 * 60 * 1000
 const ATLAS_REFRESH_INTERVAL_MS = 60_000
 const SHEETS_REFRESH_INTERVAL_FALLBACK_MS = 15 * 60 * 1000
 /** Cadence for the today-only meeting refresh. Catches meetings that
@@ -355,6 +377,52 @@ function delay(ms: number): Promise<void> {
 function memberName(members: TeamMember[], id: string | null | undefined): string {
   if (!id) return 'Unassigned'
   return members.find((m) => m.id === id)?.name ?? 'Unknown'
+}
+
+/**
+ * Split an Atlas snapshot into per-project rows and upsert each into
+ * Supabase's `atlas_cache`. Each row carries the tasks + meetings
+ * that belong to that project so a future boot without Atlas
+ * connectivity can rebuild the visible state from cache. The
+ * `activity` column is left empty for now — activities are their own
+ * table and don't need to be duplicated here.
+ */
+function cacheAtlasByProject(snapshot: AtlasSnapshot): void {
+  const tasksByProject = new Map<string, Task[]>()
+  for (const t of snapshot.tasks) {
+    const list = tasksByProject.get(t.projectId) ?? []
+    list.push(t)
+    tasksByProject.set(t.projectId, list)
+  }
+  const meetingsByProject = new Map<string, Meeting[]>()
+  for (const m of snapshot.meetings) {
+    const list = meetingsByProject.get(m.projectId) ?? []
+    list.push(m)
+    meetingsByProject.set(m.projectId, list)
+  }
+  for (const p of snapshot.projects) {
+    void upsertAtlasCache({
+      project_slug: p.id,
+      tasks: tasksByProject.get(p.id) ?? [],
+      manifests: meetingsByProject.get(p.id) ?? [],
+      activity: [],
+    })
+  }
+}
+
+/**
+ * Mirror the Sheets snapshot into `atlas_cache` under a reserved
+ * slug — Sheets currently owns just `contracting-com`, so a single
+ * row is enough. Follow-up: if additional Sheets-backed projects
+ * appear, drop the fixed slug and route through `cacheAtlasByProject`.
+ */
+function cacheSheetsSnapshot(snapshot: AtlasSnapshot): void {
+  void upsertAtlasCache({
+    project_slug: 'google-sheets-contracting',
+    tasks: snapshot.tasks,
+    manifests: snapshot.meetings,
+    activity: [],
+  })
 }
 
 export interface CreateTaskInput {
@@ -1143,9 +1211,68 @@ export function DataProvider({ children }: { children: ReactNode }) {
         consecutiveSyncFailuresRef.current = 0
         setSyncError(null)
       }
+
+      // Redundancy layer: mirror the freshly-loaded per-project Atlas
+      // snapshot into Supabase's atlas_cache. Each project gets one
+      // row keyed by its slug so a later boot with a down Atlas can
+      // fall back to the cached JSON. Fire-and-forget — the helper
+      // logs on failure and never throws.
+      if (isSupabaseConfigured() && atlasRawRef.current) {
+        cacheAtlasByProject(atlasRawRef.current)
+      }
+      if (isSupabaseConfigured() && sheetsRawRef.current) {
+        cacheSheetsSnapshot(sheetsRawRef.current)
+      }
     },
     [],
   )
+
+  /**
+   * Purge stale Supabase rows: atlas_cache entries older than
+   * `CACHE_ATLAS_TTL_MS` (usually left over from renamed slugs or
+   * decommissioned sources) and activities older than
+   * `CACHE_ACTIVITIES_TTL_MS` (past the UI's retention window).
+   *
+   * Throttled to once per calendar day via a localStorage timestamp
+   * so a fast reload loop can't hammer Supabase with delete queries.
+   * Runs after the initial data load so a fresh browser still gets a
+   * populated cache to fall back on before the purge fires.
+   */
+  const runStaleCacheCleanup = useCallback(async () => {
+    if (!isSupabaseConfigured()) return
+    if (typeof window === 'undefined') return
+    let lastRun = 0
+    try {
+      const raw = window.localStorage.getItem(CACHE_CLEANUP_STORAGE_KEY)
+      if (raw) lastRun = Number(raw) || 0
+    } catch {
+      // storage unavailable — treat as never-run
+    }
+    if (Date.now() - lastRun < CACHE_CLEANUP_INTERVAL_MS) return
+
+    const atlasCutoff = new Date(Date.now() - CACHE_ATLAS_TTL_MS).toISOString()
+    const activityCutoff = new Date(
+      Date.now() - CACHE_ACTIVITIES_TTL_MS,
+    ).toISOString()
+
+    try {
+      await Promise.all([
+        deleteStaleAtlasCache(atlasCutoff),
+        deleteOldActivities(activityCutoff),
+      ])
+      window.localStorage.setItem(
+        CACHE_CLEANUP_STORAGE_KEY,
+        String(Date.now()),
+      )
+      // eslint-disable-next-line no-console
+      console.info(
+        `[cleanup] Purged atlas_cache < ${atlasCutoff} and activities < ${activityCutoff}`,
+      )
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[cleanup] Failed to purge stale cache', err)
+    }
+  }, [])
 
   // `runAtlasLoad` is the single source of truth for "go fetch from Atlas
   // and merge into the store." Mount, the 60s interval, manual refresh,
@@ -1235,14 +1362,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void (async () => {
       await runAtlasLoad('initial', { includeMeetings: false })
-      // Fire-and-forget the meetings pass — `refreshMeetings` no-ops
-      // if Atlas isn't configured, so safe to call unconditionally.
+      // Background passes — each no-ops when its source isn't
+      // configured, so safe to fire unconditionally.
       void refreshMeetings()
+      void runTranscriptLoad()
+      // Once the initial load has landed a usable cache in Supabase,
+      // it's safe to prune anything stale. Throttled to once per
+      // day per browser.
+      void runStaleCacheCleanup()
     })()
     const handler = () => {
       void (async () => {
         await runAtlasLoad('initial', { includeMeetings: false })
         void refreshMeetings()
+        void runTranscriptLoad()
       })()
     }
     window.addEventListener(ATLAS_CONFIG_CHANGED_EVENT, handler)
@@ -1394,6 +1527,81 @@ export function DataProvider({ children }: { children: ReactNode }) {
     },
     [],
   )
+
+  /**
+   * Background pull from the Transcript Store. Runs after the initial
+   * Atlas load finishes so we can dedup-merge each transcript into
+   * the matching Atlas meeting (same date + project). No-op when the
+   * store isn't configured — the app still runs on Atlas + Sheets
+   * alone.
+   *
+   * Also stashes the result in Supabase `atlas_cache` under the
+   * reserved slug `transcripts` so the next boot can fall back to
+   * the cache if the transcript-store endpoint is unreachable.
+   */
+  const runTranscriptLoad = useCallback(async () => {
+    if (!isTranscriptStoreConfigured()) return
+    const result = await loadFromTranscriptStore()
+    if (result.errors.length > 0) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[transcripts] ${result.errors.length} error(s) during load`,
+        result.errors,
+      )
+    }
+    if (result.meetings.length === 0) return
+
+    // Merge transcript meetings into the current snapshot's meeting
+    // list — Atlas meetings win on shared (date, project) keys, but
+    // gain the transcript's summary, extra decisions, and extra
+    // action items. Transcripts with no Atlas counterpart land as
+    // standalone meetings.
+    const snap = snapshotRef.current
+    if (snap) {
+      const merged = mergeAtlasAndTranscriptMeetings(
+        snap.meetings,
+        result.meetings,
+      )
+      snapshotRef.current = { ...snap, meetings: merged }
+      setSnapshotIndex((prev) => ({
+        ...prev,
+        meetingsById: new Map(merged.map((m) => [m.id, m])),
+      }))
+      const overlay = overlayRef.current
+      setMeetings(
+        applyOverlayList(
+          merged,
+          overlay.meetings,
+          overlay.meetingTombstones,
+        ),
+      )
+    } else {
+      // No source snapshot yet — surface the transcript meetings on
+      // their own so the UI has something to render.
+      setMeetings((prev) => {
+        const known = new Set(prev.map((m) => m.id))
+        const additions = result.meetings.filter((m) => !known.has(m.id))
+        return additions.length > 0 ? [...prev, ...additions] : prev
+      })
+    }
+
+    // Redundancy write to Supabase — future boots can hydrate from
+    // here if the transcript store goes down. Fire-and-forget; the
+    // helper swallows errors.
+    if (isSupabaseConfigured()) {
+      void upsertAtlasCache({
+        project_slug: 'transcripts',
+        tasks: result.tasks,
+        manifests: result.meetings.map((m) => ({
+          id: m.id,
+          date: m.date,
+          projectId: m.projectId,
+          notes: m.notes,
+        })),
+        activity: result.index,
+      })
+    }
+  }, [])
 
   // ── Supabase bootstrap (one-shot) ─────────────────────────────────────
   // Pull every Supabase table once the source snapshot is in place,

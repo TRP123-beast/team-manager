@@ -43,6 +43,8 @@ import { useZoomBotConnection } from '@/hooks/useZoomBotConnection'
 import { cn } from '@/lib/utils'
 import { BotActionButton, StopAllButton } from '@/components/zoombot/BotControls'
 import type { LiveCaption, ZoomBot } from '@/services/zoombot-types'
+import { fetchTranscripts } from '@/services/transcript-store-api'
+import { isTranscriptStoreConfigured } from '@/services/transcript-store-config'
 
 const ALL_ROOMS = '__all__'
 
@@ -108,10 +110,61 @@ export default function LiveMeetingPage() {
   useEffect(() => {
     if (!ended) return
     const t = window.setTimeout(() => {
-      toast.info('Recordings will be available shortly.')
+      toast.info(
+        'Transcript and summary will be available shortly in the Meetings tab.',
+      )
     }, 5000)
     return () => window.clearTimeout(t)
   }, [ended])
+
+  // Poll the Transcript Store every 30 s after the meeting ends
+  // until a summary lands. Only surfaces the toast once — the ref
+  // guards against fire-again on later ticks and against the polling
+  // running past the point where the user has already navigated
+  // away.
+  const endedAtRef = useRef<number | null>(null)
+  const summaryToastFiredRef = useRef<boolean>(false)
+  useEffect(() => {
+    if (!ended) {
+      endedAtRef.current = null
+      summaryToastFiredRef.current = false
+      return
+    }
+    if (!isTranscriptStoreConfigured()) return
+    if (endedAtRef.current === null) endedAtRef.current = Date.now()
+
+    const poll = async () => {
+      if (summaryToastFiredRef.current) return
+      try {
+        const { items } = await fetchTranscripts(1, 0)
+        const latest = items[0]
+        if (!latest || !latest.has_summary) return
+        const summarisedAt = Date.parse(latest.created_at)
+        // Only consider transcripts ingested after this meeting ended.
+        if (
+          Number.isFinite(summarisedAt) &&
+          endedAtRef.current !== null &&
+          summarisedAt >= endedAtRef.current
+        ) {
+          summaryToastFiredRef.current = true
+          toast.success('Meeting summary ready.', {
+            action: {
+              label: 'View',
+              onClick: () => navigate('/meetings'),
+            },
+            duration: 10_000,
+          })
+        }
+      } catch {
+        // Silent — a failed poll is fine; the next tick will retry.
+      }
+    }
+
+    const id = window.setInterval(() => {
+      void poll()
+    }, 30_000)
+    return () => window.clearInterval(id)
+  }, [ended, navigate])
 
   // ── Meeting start time / duration ──────────────────────────────────
   // We pin the start at the first caption's timestamp once it arrives,
@@ -191,7 +244,7 @@ export default function LiveMeetingPage() {
           {ended && (
             <MeetingEndedBanner
               capturesCount={captions.length}
-              onViewRecordings={() => navigate('/recordings')}
+              onViewMeetings={() => navigate('/meetings')}
             />
           )}
           {rooms.length > 1 && (
@@ -258,25 +311,31 @@ function ConnectionPill({
 
 function MeetingEndedBanner({
   capturesCount,
-  onViewRecordings,
+  onViewMeetings,
 }: {
   capturesCount: number
-  onViewRecordings: () => void
+  onViewMeetings: () => void
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-subtle)] bg-[color-mix(in_srgb,var(--accent-primary)_8%,var(--bg-surface))] px-4 py-3 md:px-6">
-      <p className="text-sm text-[var(--text-primary)]">
-        Meeting ended.{' '}
-        <span className="text-[var(--text-secondary)]">
-          {capturesCount} caption{capturesCount === 1 ? '' : 's'} captured.
-        </span>
-      </p>
+      <div className="min-w-0">
+        <p className="text-sm text-[var(--text-primary)]">
+          Meeting ended.{' '}
+          <span className="text-[var(--text-secondary)]">
+            {capturesCount} caption{capturesCount === 1 ? '' : 's'} captured.
+          </span>
+        </p>
+        <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+          Transcript and summary will appear in the Meetings tab in a few
+          seconds.
+        </p>
+      </div>
       <button
         type="button"
-        onClick={onViewRecordings}
+        onClick={onViewMeetings}
         className="inline-flex h-8 items-center justify-center rounded-md bg-[var(--accent-primary)] px-3 text-xs font-medium text-[var(--text-inverse)] transition-colors hover:bg-[var(--accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-focus)]"
       >
-        View Recordings
+        View Meetings
       </button>
     </div>
   )

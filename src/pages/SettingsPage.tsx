@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react'
 import { AccountSection } from '@/components/settings/AccountSection'
 import { AtlasDataOverview } from '@/components/settings/AtlasDataOverview'
-import { AtlasEndpointTable } from '@/components/settings/AtlasEndpointTable'
 import { AtlasSection } from '@/components/settings/AtlasSection'
 import { SheetsSection } from '@/components/settings/SheetsSection'
+import { SourcesOverviewTable } from '@/components/settings/SourcesOverviewTable'
+import { SupabaseSection } from '@/components/settings/SupabaseSection'
+import { TranscriptStoreSection } from '@/components/settings/TranscriptStoreSection'
 import { ZoomBotSection } from '@/components/settings/ZoomBotSection'
 import { DiscordSection } from '@/components/settings/DiscordSection'
 import { NotificationsSection } from '@/components/settings/NotificationsSection'
@@ -48,6 +50,27 @@ export default function SettingsPage() {
         </p>
       </header>
 
+      {/* Top-of-page summary of every data source the app talks to.
+          Sits above the per-source configuration cards so PMs can see
+          overall health before drilling into a specific integration. */}
+      {isPM && (
+        <SettingsCard>
+          <SourcesOverviewTable />
+        </SettingsCard>
+      )}
+
+      {isPM && (
+        <SettingsCard>
+          <ZoomBotSection />
+        </SettingsCard>
+      )}
+
+      {isPM && (
+        <SettingsCard>
+          <TranscriptStoreSection />
+        </SettingsCard>
+      )}
+
       {isPM &&
         (showDataOverview ? (
           // Side-by-side on lg+ — API connection on the left, the
@@ -68,19 +91,16 @@ export default function SettingsPage() {
 
       {isPM && (
         <SettingsCard>
-          <AtlasEndpointTable />
-        </SettingsCard>
-      )}
-      {isPM && (
-        <SettingsCard>
           <SheetsSection />
         </SettingsCard>
       )}
+
       {isPM && (
         <SettingsCard>
-          <ZoomBotSection />
+          <SupabaseSection />
         </SettingsCard>
       )}
+
       {isPM && (
         <SettingsCard>
           <WorkspaceSection />
