@@ -21,7 +21,7 @@
 import { useMemo } from 'react'
 import { useAuth } from '@/data/auth'
 import { useData } from '@/data/store'
-import type { Task } from '@/data/types'
+import type { Meeting, Task } from '@/data/types'
 
 export interface Permissions {
   /** Non-null iff the current user is a Member — the set of project ids
@@ -37,6 +37,13 @@ export interface Permissions {
   canSeeProject: (projectId: string) => boolean
   canSeeAllTasks: boolean
   canSeeTask: (task: Task) => boolean
+  /** Meetings are gated by attendance, not project membership. PM
+   *  sees everything. Members see a meeting iff they're on its
+   *  attendee list (matched by id, name substring, or lowercase alias)
+   *  OR they have an action item assigned. Meetings without an
+   *  attendee list stay hidden from members — encourages proper
+   *  attendee tracking. */
+  canSeeMeeting: (meeting: Meeting) => boolean
 
   // ── What the current user can DO ───────────────────────────────────
   canEditTask: (task: Task) => boolean
@@ -52,6 +59,7 @@ export function usePermissions(): Permissions {
   const { currentUser, isPM } = useAuth()
   const { tasks } = useData()
   const currentUserId = currentUser?.id ?? null
+  const currentUserName = currentUser?.name ?? null
 
   // The set of project ids the current member can access. PM gets
   // `null` so downstream can shortcut with a truthy check.
@@ -81,6 +89,37 @@ export function usePermissions(): Permissions {
     const canChangePriority = (task: Task): boolean =>
       isPM || task.assigneeId === currentUserId
 
+    // Membership in a meeting's attendee list. Meetings ingested from
+    // ZoomBot / transcripts often carry attendees as free-form names
+    // (parsed from filenames), so we accept an id match, a full-name
+    // match, or a substring match either way.
+    const canSeeMeeting = (meeting: Meeting): boolean => {
+      if (isPM) return true
+      if (!currentUserId) return false
+      const attendees = meeting.attendeeIds ?? []
+      // No attendee list at all → hide from Members; there's no way
+      // to verify they attended, and this nudges the ingest side to
+      // populate the list going forward.
+      if (attendees.length === 0) return false
+      const uid = currentUserId.toLowerCase()
+      const uname = currentUserName?.toLowerCase() ?? ''
+      const inAttendees = attendees.some((a) => {
+        const lower = a.toLowerCase()
+        if (lower === uid) return true
+        if (uname && lower === uname) return true
+        if (uname && (lower.includes(uname) || uname.includes(lower))) return true
+        if (lower.includes(uid) || uid.includes(lower)) return true
+        return false
+      })
+      if (inAttendees) return true
+      // Action-item fallback: even if the attendee list missed them,
+      // an item explicitly assigned to them means they were part of
+      // the meeting.
+      return (meeting.actionItems ?? []).some(
+        (item) => item.assigneeId?.toLowerCase() === uid,
+      )
+    }
+
     return {
       memberProjectIds,
       currentUserId,
@@ -88,6 +127,7 @@ export function usePermissions(): Permissions {
       canSeeProject,
       canSeeAllTasks: isPM,
       canSeeTask,
+      canSeeMeeting,
       canEditTask,
       canCommentOnTask,
       canCreateTask,
@@ -98,5 +138,5 @@ export function usePermissions(): Permissions {
       canChangeAssignee: () => isPM,
       canChangePriority,
     }
-  }, [isPM, currentUserId, memberProjectIds])
+  }, [isPM, currentUserId, currentUserName, memberProjectIds])
 }

@@ -51,14 +51,29 @@ function App() {
             path="/projects/:projectId/meetings/:meetingId"
             element={<MeetingDetailPage />}
           />
-          <Route path="/atlas" element={<AtlasPage />} />
+          <Route
+            path="/atlas"
+            element={
+              <ProtectedRoute requirePM>
+                <AtlasPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/atlas/tasks/:project/:id"
-            element={<AtlasTaskDetailPage />}
+            element={
+              <ProtectedRoute requirePM>
+                <AtlasTaskDetailPage />
+              </ProtectedRoute>
+            }
           />
           <Route
             path="/atlas/summaries/:project/:date"
-            element={<AtlasSummaryDetailPage />}
+            element={
+              <ProtectedRoute requirePM>
+                <AtlasSummaryDetailPage />
+              </ProtectedRoute>
+            }
           />
           <Route path="/team" element={<TeamPage />} />
           <Route path="/meetings/live" element={<LiveMeetingPage />} />

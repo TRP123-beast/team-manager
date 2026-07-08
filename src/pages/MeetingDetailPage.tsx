@@ -86,7 +86,7 @@ export default function MeetingDetailPage() {
   const navigate = useNavigate()
   const { openTask } = useTaskPanel()
   const { currentUser, isPM } = useAuth()
-  const { canSeeProject } = usePermissions()
+  const { canSeeMeeting } = usePermissions()
   const {
     meetings,
     projects,
@@ -120,13 +120,13 @@ export default function MeetingDetailPage() {
   }, [meeting?.status, meeting?.id])
 
   if (!projectId || !meetingId) return <Navigate to="/projects" replace />
-  // RBAC gate — Member visiting a meeting URL for a project they're
-  // not on. Comments etc. still work if they ARE on the project, so
-  // we deny at the project level rather than the meeting itself.
-  if (meeting && !canSeeProject(meeting.projectId)) {
+  // RBAC gate — attendance-based. A Member visiting a meeting URL
+  // they didn't attend gets a targeted message; no content leaks
+  // (notes / decisions / action items / transcript stay unmounted).
+  if (meeting && !canSeeMeeting(meeting)) {
     return (
       <AccessDenied
-        message="You don't have access to this meeting."
+        message="You weren't part of this meeting."
         backTo="/meetings"
         backLabel="Back to Meetings"
       />

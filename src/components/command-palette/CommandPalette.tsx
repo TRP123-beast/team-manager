@@ -120,7 +120,8 @@ export function CommandPalette({ open, onClose, onCreateTask }: CommandPalettePr
   const navigate = useNavigate()
   const { openTask } = useTaskPanel()
   const { isPM, logout } = useAuth()
-  const { canSeeAllProjects, canSeeProject, canSeeTask } = usePermissions()
+  const { canSeeAllProjects, canSeeProject, canSeeTask, canSeeMeeting } =
+    usePermissions()
   const {
     tasks: allTasks,
     projects: allProjects,
@@ -141,12 +142,13 @@ export function CommandPalette({ open, onClose, onCreateTask }: CommandPalettePr
         : allProjects.filter((p) => canSeeProject(p.id)),
     [allProjects, canSeeAllProjects, canSeeProject],
   )
+  // Meetings gate on attendance for members, matching MeetingsPage.
   const meetings = useMemo(
     () =>
       canSeeAllProjects
         ? allMeetings
-        : allMeetings.filter((m) => canSeeProject(m.projectId)),
-    [allMeetings, canSeeAllProjects, canSeeProject],
+        : allMeetings.filter((m) => canSeeMeeting(m)),
+    [allMeetings, canSeeAllProjects, canSeeMeeting],
   )
 
   const [input, setInput] = useState('')

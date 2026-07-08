@@ -111,17 +111,20 @@ export default function MeetingsPage() {
     isInitialLoading,
     refreshMeetings,
   } = useData()
-  const { canSeeAllProjects, canSeeProject } = usePermissions()
+  const { canSeeAllProjects, canSeeProject, canSeeMeeting } = usePermissions()
 
-  // RBAC: Members only see meetings and projects for projects they're
-  // assigned to. Everything downstream (project dropdown, status
-  // counts, filtered list) uses these.
+  // RBAC: Meetings are gated by attendance (see canSeeMeeting), not by
+  // the project-membership rule that scopes tasks. The project
+  // dropdown stays scoped to member-visible projects so the filter
+  // control matches everything else on the page — a project the
+  // Member IS on but has zero visible meetings in shows an empty
+  // list, which is a truthful state, not confusing.
   const meetings = useMemo(
     () =>
       canSeeAllProjects
         ? allMeetings
-        : allMeetings.filter((m) => canSeeProject(m.projectId)),
-    [allMeetings, canSeeAllProjects, canSeeProject],
+        : allMeetings.filter((m) => canSeeMeeting(m)),
+    [allMeetings, canSeeAllProjects, canSeeMeeting],
   )
   const projects = useMemo(
     () =>
@@ -281,7 +284,7 @@ export default function MeetingsPage() {
       </header>
 
       {meetings.length === 0 ? (
-        <EmptyState />
+        <EmptyState memberScope={!canSeeAllProjects} />
       ) : (
         <>
           <div className="space-y-3">
@@ -491,7 +494,7 @@ export default function MeetingsPage() {
   )
 }
 
-function EmptyState() {
+function EmptyState({ memberScope }: { memberScope: boolean }) {
   return (
     <div className="flex min-h-[240px] flex-col items-center justify-center rounded-lg border border-dashed border-[var(--border-subtle)] bg-[var(--bg-surface)]/40 px-6 py-12 text-center">
       <CalendarRange
@@ -500,11 +503,12 @@ function EmptyState() {
         aria-hidden="true"
       />
       <h2 className="mt-3 text-sm font-medium text-[var(--text-secondary)]">
-        No meetings yet
+        {memberScope ? 'No meetings found' : 'No meetings yet'}
       </h2>
       <p className="mt-1 max-w-sm text-xs text-[var(--text-muted)]">
-        Open a project to schedule a meeting — discussions, decisions, and
-        action items all live under the project they belong to.
+        {memberScope
+          ? "You'll see meetings here when you're added as an attendee or assigned an action item."
+          : 'Open a project to schedule a meeting — discussions, decisions, and action items all live under the project they belong to.'}
       </p>
     </div>
   )

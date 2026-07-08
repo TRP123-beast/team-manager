@@ -52,7 +52,7 @@ type Confirm = { kind: 'archive' | 'delete' } | null
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const { isPM } = useAuth()
-  const { canSeeProject } = usePermissions()
+  const { canSeeProject, canSeeMeeting } = usePermissions()
   const {
     projects,
     tasks,
@@ -104,10 +104,17 @@ export default function ProjectDetailPage() {
     () => (projectId ? tasks.filter((t) => t.projectId === projectId) : []),
     [tasks, projectId],
   )
+  // Project's meetings — filter by attendance for Members so the
+  // count and the meetings tab both reflect what they can actually
+  // see. PM: no filter.
   const projectMeetings = useMemo(
     () =>
-      projectId ? meetings.filter((m) => m.projectId === projectId) : [],
-    [meetings, projectId],
+      projectId
+        ? meetings.filter(
+            (m) => m.projectId === projectId && (isPM || canSeeMeeting(m)),
+          )
+        : [],
+    [meetings, projectId, isPM, canSeeMeeting],
   )
   const stats = useMemo(() => {
     let open = 0

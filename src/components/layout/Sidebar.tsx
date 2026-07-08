@@ -34,15 +34,33 @@ const sharedItems: NavItem[] = [
   { to: '/my-tasks', label: 'My Tasks', icon: CheckSquare },
   { to: '/projects', label: 'Projects', icon: FolderOpen, matchNested: true },
   { to: '/meetings', label: 'Meetings', icon: CalendarRange, matchNested: true },
-  { to: '/atlas', label: 'Atlas', icon: Radio, matchNested: true },
   { to: '/team', label: 'Team', icon: Users },
 ]
+
+// Atlas is PM-only — the section is a data-integration surface, not
+// something team members act on. Slotted between the shared items and
+// Team so the nav order matches the pre-RBAC layout for PMs.
+const atlasItem: NavItem = {
+  to: '/atlas',
+  label: 'Atlas',
+  icon: Radio,
+  matchNested: true,
+}
 
 const settingsItem: NavItem = { to: '/settings', label: 'Settings', icon: Settings }
 
 export function Sidebar({ mobileOpen, onMobileClose }: SidebarProps) {
   const { isPM } = useAuth()
-  const primaryItems: NavItem[] = isPM ? [dashboardItem, ...sharedItems] : sharedItems
+  const primaryItems: NavItem[] = isPM
+    ? [
+        dashboardItem,
+        // Keep Atlas next to Meetings so the info-consumption group
+        // stays clustered (Meetings → Atlas → Team).
+        ...sharedItems.slice(0, 4),
+        atlasItem,
+        ...sharedItems.slice(4),
+      ]
+    : sharedItems
   return (
     <>
       {/* Mobile backdrop */}
