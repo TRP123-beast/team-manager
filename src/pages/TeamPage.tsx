@@ -13,6 +13,7 @@ import { TeamMemberCard } from '@/components/team/TeamMemberCard'
 import { TeamMemberExpanded } from '@/components/team/TeamMemberExpanded'
 import { useAuth } from '@/data/auth'
 import { useData } from '@/data/store'
+import { usePermissions } from '@/hooks/usePermissions'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useScrollRestore } from '@/hooks/useScrollRestore'
 import { isOverdue } from '@/lib/date-utils'
@@ -33,6 +34,7 @@ export default function TeamPage() {
   useDocumentTitle('Team')
   useScrollRestore()
   const { currentUser, isPM } = useAuth()
+  const { canSeeProject } = usePermissions()
   const {
     teamMembers,
     tasks,
@@ -327,7 +329,14 @@ export default function TeamPage() {
                   <div className="md:col-span-2">
                     <TeamMemberExpanded
                       member={m}
-                      tasks={tasksByMember.get(m.id) ?? []}
+                      // RBAC: when a Member expands someone else's card,
+                      // narrow the visible task list to projects they
+                      // share. Own card and PM viewers see everything.
+                      tasks={(() => {
+                        const memberTasks = tasksByMember.get(m.id) ?? []
+                        if (isPM || m.id === currentUser.id) return memberTasks
+                        return memberTasks.filter((t) => canSeeProject(t.projectId))
+                      })()}
                       projectsById={projectsById}
                       canRemove={canRemove}
                       onRemove={() => setConfirmRemove(m)}

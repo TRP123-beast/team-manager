@@ -27,6 +27,7 @@ import { ConfirmModal } from '@/components/shared/ConfirmModal'
 import { SkeletonCard, SkeletonLine } from '@/components/shared/Skeleton'
 import { useAuth } from '@/data/auth'
 import { useData } from '@/data/store'
+import { usePermissions } from '@/hooks/usePermissions'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
 import { loadBoardView, saveBoardView, type BoardView as BoardViewMode } from '@/lib/board-view'
 import {
@@ -71,9 +72,10 @@ interface BoardViewProps {
  */
 export function BoardView({ forcedProjectId }: BoardViewProps) {
   const { currentUser, isPM } = useAuth()
+  const { canSeeAllProjects, canSeeProject, canSeeTask } = usePermissions()
   const {
-    tasks,
-    projects,
+    tasks: allTasks,
+    projects: allProjects,
     teamMembers,
     activities,
     locallyModifiedTaskIds,
@@ -85,6 +87,21 @@ export function BoardView({ forcedProjectId }: BoardViewProps) {
     statusLabels,
     isInitialLoading,
   } = useData()
+
+  // RBAC: for Members, restrict the raw tasks + projects to the ones
+  // they can see. Everything downstream (filter dropdowns, columns,
+  // grouping, kbd navigation, drag targets) inherits the restriction.
+  const tasks = useMemo(
+    () => (canSeeAllProjects ? allTasks : allTasks.filter((t) => canSeeTask(t))),
+    [allTasks, canSeeAllProjects, canSeeTask],
+  )
+  const projects = useMemo(
+    () =>
+      canSeeAllProjects
+        ? allProjects
+        : allProjects.filter((p) => canSeeProject(p.id)),
+    [allProjects, canSeeAllProjects, canSeeProject],
+  )
   const [searchParams] = useSearchParams()
   const { openCreateTask } = useOutletContext<LayoutOutletContext>()
 

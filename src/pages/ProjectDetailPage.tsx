@@ -34,6 +34,8 @@ import { ConfirmModal } from '@/components/shared/ConfirmModal'
 import { AvatarStack } from '@/components/shared/AvatarStack'
 import { useAuth } from '@/data/auth'
 import { useData } from '@/data/store'
+import { usePermissions } from '@/hooks/usePermissions'
+import { AccessDenied } from '@/components/shared/AccessDenied'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useZoomBot } from '@/hooks/useZoomBot'
 import { isOverdue } from '@/lib/date-utils'
@@ -50,6 +52,7 @@ type Confirm = { kind: 'archive' | 'delete' } | null
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const { isPM } = useAuth()
+  const { canSeeProject } = usePermissions()
   const {
     projects,
     tasks,
@@ -133,6 +136,18 @@ export default function ProjectDetailPage() {
   )
 
   if (!projectId) return <Navigate to="/projects" replace />
+  // RBAC gate: a Member landing on a project they have no tasks in.
+  // We render an inline AccessDenied instead of redirecting so the URL
+  // is preserved and sharing/bookmarking is transparent.
+  if (project && !canSeeProject(project.id)) {
+    return (
+      <AccessDenied
+        message="You don't have access to this project. Ask your PM if this is a mistake."
+        backTo="/projects"
+        backLabel="Back to Projects"
+      />
+    )
+  }
   if (!project) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">

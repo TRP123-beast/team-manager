@@ -13,6 +13,7 @@ import {
 import { useAuth } from '@/data/auth'
 import { useData } from '@/data/store'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
+import { usePermissions } from '@/hooks/usePermissions'
 import { useScrollRestore } from '@/hooks/useScrollRestore'
 import { cn } from '@/lib/utils'
 import type { Project, TeamMember } from '@/data/types'
@@ -24,8 +25,9 @@ export default function ProjectsPage() {
   useDocumentTitle('Projects')
   useScrollRestore()
   const { isPM } = useAuth()
+  const { canSeeAllProjects, canSeeProject } = usePermissions()
   const {
-    projects,
+    projects: allProjects,
     tasks,
     teamMembers,
     createProject,
@@ -36,6 +38,14 @@ export default function ProjectsPage() {
     projectDataSources,
   } = useData()
   const [searchParams, setSearchParams] = useSearchParams()
+
+  // RBAC: Members only see projects they have tasks assigned in. PM
+  // sees everything. `projects` is the visible slice used by the rest
+  // of the page — counts, tabs, empty state, the grid.
+  const projects = useMemo(
+    () => (canSeeAllProjects ? allProjects : allProjects.filter((p) => canSeeProject(p.id))),
+    [allProjects, canSeeAllProjects, canSeeProject],
+  )
 
   const [tab, setTab] = useState<Tab>('active')
   const [createOpen, setCreateOpen] = useState(false)
@@ -70,16 +80,23 @@ export default function ProjectsPage() {
   // Workspace-wide totals for the header. Counts open + overdue
   // across ALL projects (active and archived); the header is a
   // workspace dashboard, not a reflection of the current tab.
+  // For members, scope aggregate counts to their visible projects
+  // (otherwise the header would show workspace-wide totals while the
+  // grid only lists a subset — mismatch reads as a bug).
   const aggregate = useMemo(() => {
+    const visibleProjectIds = canSeeAllProjects
+      ? null
+      : new Set(projects.map((p) => p.id))
     let open = 0
     let overdue = 0
     for (const t of tasks) {
       if (t.status === 'done') continue
+      if (visibleProjectIds && !visibleProjectIds.has(t.projectId)) continue
       open += 1
       if (isOverdue(t.dueDate)) overdue += 1
     }
     return { open, overdue }
-  }, [tasks])
+  }, [tasks, projects, canSeeAllProjects])
 
   // Show the dashed "+ New Project" tile when there's room in the
   // visible grid (under 4 projects) and the user is allowed to create
@@ -367,12 +384,12 @@ function EmptyProjects({
           aria-hidden="true"
         />
         <h2 className="mt-4 text-base font-medium text-[var(--text-secondary)]">
-          No projects yet
+          {isPM ? 'No projects yet' : "You're not on any projects yet"}
         </h2>
         <p className="mt-1 max-w-sm text-sm text-[var(--text-muted)]">
           {isPM
             ? 'Create your first project to start organizing work.'
-            : 'Your PM will set them up.'}
+            : 'Ask your PM to assign you tasks — a project will show up here once you have work in it.'}
         </p>
         {isPM && (
           <button

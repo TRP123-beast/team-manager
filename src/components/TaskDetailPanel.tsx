@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Expand, FileQuestion, X } from 'lucide-react'
+import { Expand, FileQuestion, Lock, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { ActivityCommentFeed } from '@/components/task-detail/ActivityCommentFeed'
 import { AtlasMarkdown } from '@/components/atlas/AtlasMarkdown'
@@ -169,9 +169,21 @@ function PanelBody({ taskId, onClose }: PanelBodyProps) {
   const isReadOnlySource = isAtlasManaged || isSheetsManaged
   const canEditTitle = canEditTask && !isReadOnlySource
   const canChangeAssignee = canPMEdit && !isReadOnlySource
-  const canChangePriority = canPMEdit && !isReadOnlySource
+  // Members can change priority on their OWN tasks — per RBAC spec,
+  // priority is a self-managed field, not a management-only one.
+  const canChangePriority = canEditTask && !isReadOnlySource
   const canChangeDueDate = canEditTask && !isReadOnlySource
   const canDeleteTask = canPMEdit && !isReadOnlySource
+
+  // View-only banner: a Member has permission to SEE this task
+  // (it's in one of their projects) but not to edit it, because it's
+  // assigned to someone else. Communicates the "why" so disabled
+  // controls don't read as broken.
+  const assignee = task.assigneeId
+    ? teamMembers.find((m) => m.id === task.assigneeId)
+    : null
+  const showViewOnlyBanner =
+    !isPM && !assignedToMe && !isReadOnlySource
 
   const safeUpdate = async (label: string, fn: () => Promise<unknown>) => {
     try {
@@ -232,6 +244,21 @@ function PanelBody({ taskId, onClose }: PanelBodyProps) {
       </div>
 
       <div className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        {showViewOnlyBanner && (
+          <div
+            className="flex items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/40 px-3 py-2 text-xs text-[var(--text-secondary)]"
+            role="status"
+          >
+            <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>
+              View only —{' '}
+              {assignee
+                ? <>assigned to <span className="font-medium text-[var(--text-primary)]">{assignee.name}</span></>
+                : <>this task isn't assigned to you</>}
+              . You can still add comments below.
+            </span>
+          </div>
+        )}
         {task.sourceMeetingId && (
           <MeetingSourceBanner sourceMeetingId={task.sourceMeetingId} />
         )}

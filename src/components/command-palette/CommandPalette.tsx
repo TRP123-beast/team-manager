@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { StatusPill } from '@/components/shared/StatusPill'
 import { useAuth } from '@/data/auth'
+import { usePermissions } from '@/hooks/usePermissions'
 import { useTaskPanel } from '@/data/task-panel'
 import { useData } from '@/data/store'
 import { useFocusTrap } from '@/hooks/useFocusTrap'
@@ -119,7 +120,34 @@ export function CommandPalette({ open, onClose, onCreateTask }: CommandPalettePr
   const navigate = useNavigate()
   const { openTask } = useTaskPanel()
   const { isPM, logout } = useAuth()
-  const { tasks, projects, teamMembers, meetings } = useData()
+  const { canSeeAllProjects, canSeeProject, canSeeTask } = usePermissions()
+  const {
+    tasks: allTasks,
+    projects: allProjects,
+    teamMembers,
+    meetings: allMeetings,
+  } = useData()
+
+  // RBAC: results are filtered so a Member can't discover work they
+  // don't have access to via search. PM sees everything (no filter).
+  const tasks = useMemo(
+    () => (canSeeAllProjects ? allTasks : allTasks.filter((t) => canSeeTask(t))),
+    [allTasks, canSeeAllProjects, canSeeTask],
+  )
+  const projects = useMemo(
+    () =>
+      canSeeAllProjects
+        ? allProjects
+        : allProjects.filter((p) => canSeeProject(p.id)),
+    [allProjects, canSeeAllProjects, canSeeProject],
+  )
+  const meetings = useMemo(
+    () =>
+      canSeeAllProjects
+        ? allMeetings
+        : allMeetings.filter((m) => canSeeProject(m.projectId)),
+    [allMeetings, canSeeAllProjects, canSeeProject],
+  )
 
   const [input, setInput] = useState('')
   const [query, setQuery] = useState('')

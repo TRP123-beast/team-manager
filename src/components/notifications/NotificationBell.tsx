@@ -17,6 +17,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { useAuth } from '@/data/auth'
 import { useData } from '@/data/store'
+import { usePermissions } from '@/hooks/usePermissions'
 import { relativeTime } from '@/lib/date-utils'
 import {
   isNotifSoundEnabled,
@@ -63,6 +64,7 @@ interface NotificationGroup {
 
 export function NotificationBell() {
   const { currentUser } = useAuth()
+  const { canSeeAllTasks, canSeeTask } = usePermissions()
   const {
     notifications,
     tasks,
@@ -80,13 +82,31 @@ export function NotificationBell() {
   // once per new arrival without firing on initial mount.
   const prevNewestId = useRef<string | null>(null)
 
+  // Build a lookup once so the recipient-filter can also drop
+  // notifications pointing at tasks the current user has since lost
+  // access to (e.g. a mention on a task in a project they were later
+  // removed from). Without this, clicking the notification would land
+  // on AccessDenied — bad UX.
+  const tasksByIdForFilter = useMemo(
+    () => new Map(tasks.map((t) => [t.id, t])),
+    [tasks],
+  )
+
   const myNotifications = useMemo(() => {
     if (!currentUser) return []
     return notifications
-      .filter((n) => n.recipientId === currentUser.id)
+      .filter((n) => {
+        if (n.recipientId !== currentUser.id) return false
+        if (canSeeAllTasks) return true
+        // Filter to tasks the user can still see. Unknown taskIds
+        // (tasks deleted or not yet loaded) are hidden — safer to
+        // omit than to route the user into a broken state.
+        const t = tasksByIdForFilter.get(n.taskId)
+        return t ? canSeeTask(t) : false
+      })
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, MAX_NOTIFICATIONS)
-  }, [notifications, currentUser])
+  }, [notifications, currentUser, canSeeAllTasks, canSeeTask, tasksByIdForFilter])
 
   const unreadCount = useMemo(
     () => myNotifications.filter((n) => !n.read).length,

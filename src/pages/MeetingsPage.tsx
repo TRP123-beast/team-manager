@@ -11,6 +11,7 @@ import { CalendarView, type CalendarItem } from '@/components/CalendarView'
 import { MeetingListRow } from '@/components/meetings/MeetingListRow'
 import { SkeletonLine } from '@/components/shared/Skeleton'
 import { useData } from '@/data/store'
+import { usePermissions } from '@/hooks/usePermissions'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useScrollRestore } from '@/hooks/useScrollRestore'
 import { now } from '@/lib/date-utils'
@@ -104,12 +105,31 @@ export default function MeetingsPage() {
   useDocumentTitle('Meetings')
   useScrollRestore()
   const {
-    meetings,
-    projects,
+    meetings: allMeetings,
+    projects: allProjects,
     teamMembers,
     isInitialLoading,
     refreshMeetings,
   } = useData()
+  const { canSeeAllProjects, canSeeProject } = usePermissions()
+
+  // RBAC: Members only see meetings and projects for projects they're
+  // assigned to. Everything downstream (project dropdown, status
+  // counts, filtered list) uses these.
+  const meetings = useMemo(
+    () =>
+      canSeeAllProjects
+        ? allMeetings
+        : allMeetings.filter((m) => canSeeProject(m.projectId)),
+    [allMeetings, canSeeAllProjects, canSeeProject],
+  )
+  const projects = useMemo(
+    () =>
+      canSeeAllProjects
+        ? allProjects
+        : allProjects.filter((p) => canSeeProject(p.id)),
+    [allProjects, canSeeAllProjects, canSeeProject],
+  )
 
   // Pull a fresh 30-day window every time the user lands here. The
   // store's background tick skips manifests and the dedicated meeting

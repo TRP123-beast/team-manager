@@ -21,8 +21,10 @@ import { Breadcrumb } from '@/components/Breadcrumb'
 import { ConfirmModal } from '@/components/shared/ConfirmModal'
 import { DueDatePicker } from '@/components/shared/DueDatePicker'
 import { RecordingsSection } from '@/components/recordings/RecordingsSection'
+import { AccessDenied } from '@/components/shared/AccessDenied'
 import { useAuth } from '@/data/auth'
 import { useData } from '@/data/store'
+import { usePermissions } from '@/hooks/usePermissions'
 import { useTaskPanel } from '@/data/task-panel'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { formatAbsoluteDateTime, formatMeetingDate, relativeTime } from '@/lib/date-utils'
@@ -84,6 +86,7 @@ export default function MeetingDetailPage() {
   const navigate = useNavigate()
   const { openTask } = useTaskPanel()
   const { currentUser, isPM } = useAuth()
+  const { canSeeProject } = usePermissions()
   const {
     meetings,
     projects,
@@ -117,6 +120,18 @@ export default function MeetingDetailPage() {
   }, [meeting?.status, meeting?.id])
 
   if (!projectId || !meetingId) return <Navigate to="/projects" replace />
+  // RBAC gate — Member visiting a meeting URL for a project they're
+  // not on. Comments etc. still work if they ARE on the project, so
+  // we deny at the project level rather than the meeting itself.
+  if (meeting && !canSeeProject(meeting.projectId)) {
+    return (
+      <AccessDenied
+        message="You don't have access to this meeting."
+        backTo="/meetings"
+        backLabel="Back to Meetings"
+      />
+    )
+  }
   if (!meeting || !project) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">

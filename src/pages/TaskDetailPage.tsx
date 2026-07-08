@@ -11,8 +11,11 @@ import { TagsSection } from '@/components/task-detail/TagsSection'
 import { TaskHeader } from '@/components/task-detail/TaskHeader'
 import { ConfirmModal } from '@/components/shared/ConfirmModal'
 import { MeetingSourceBanner } from '@/components/task-detail/MeetingSourceBanner'
+import { AccessDenied } from '@/components/shared/AccessDenied'
 import { useAuth } from '@/data/auth'
 import { useData } from '@/data/store'
+import { usePermissions } from '@/hooks/usePermissions'
+import { Lock } from 'lucide-react'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { useIsReadOnly } from '@/hooks/useIsReadOnly'
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts'
@@ -39,6 +42,7 @@ export default function TaskDetailPage() {
   const { taskId } = useParams<{ taskId: string }>()
   const navigate = useNavigate()
   const { currentUser, isPM } = useAuth()
+  const { canSeeTask } = usePermissions()
   const {
     tasks,
     projects,
@@ -80,6 +84,18 @@ export default function TaskDetailPage() {
   if (!task) {
     return <TaskNotFound />
   }
+  // RBAC gate — a Member landing here for a task in a project they
+  // aren't on. Refuse to render the content at all (not even
+  // read-only) per the spec.
+  if (!canSeeTask(task)) {
+    return (
+      <AccessDenied
+        message="You don't have access to this task."
+        backTo="/my-tasks"
+        backLabel="Back to My Tasks"
+      />
+    )
+  }
 
   const assignedToMe = currentUser?.id === task.assigneeId
   const canPMEdit = isPM
@@ -100,9 +116,20 @@ export default function TaskDetailPage() {
   const isReadOnlySource = isAtlasManaged || isSheetsManaged
   const canEditTitle = canEditTask && !isReadOnlySource
   const canChangeAssignee = canPMEdit && !isReadOnlySource
-  const canChangePriority = canPMEdit && !isReadOnlySource
+  // Members can change priority on their OWN tasks — priority is
+  // self-managed, not management-only.
+  const canChangePriority = canEditTask && !isReadOnlySource
   const canChangeDueDate = canEditTask && !isReadOnlySource
   const canDeleteTask = canPMEdit && !isReadOnlySource
+
+  // View-only banner shows when a Member can see this task (project
+  // they're on) but it isn't theirs — communicates why the header
+  // controls read as disabled instead of leaving them mystery-inert.
+  const assignee = task.assigneeId
+    ? teamMembers.find((m) => m.id === task.assigneeId)
+    : null
+  const showViewOnlyBanner =
+    !isPM && !assignedToMe && !isReadOnlySource
 
   const handleDelete = async () => {
     setConfirmOpen(false)
@@ -169,6 +196,21 @@ export default function TaskDetailPage() {
       />
       </div>
 
+      {showViewOnlyBanner && (
+        <div
+          className="flex items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/40 px-3 py-2 text-xs text-[var(--text-secondary)]"
+          role="status"
+        >
+          <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+          <span>
+            View only —{' '}
+            {assignee
+              ? <>assigned to <span className="font-medium text-[var(--text-primary)]">{assignee.name}</span></>
+              : <>this task isn't assigned to you</>}
+            . You can still add comments below.
+          </span>
+        </div>
+      )}
       {task.sourceMeetingId && (
         <MeetingSourceBanner sourceMeetingId={task.sourceMeetingId} />
       )}
