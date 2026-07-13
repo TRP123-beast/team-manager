@@ -299,7 +299,9 @@ export function CommentInput({
         isReply && 'pl-10',
       )}
     >
-      {currentUser && !isReply && <Avatar name={currentUser.name} size="sm" />}
+      {currentUser && !isReply && (
+        <Avatar name={currentUser.name} imageUrl={currentUser.avatarUrl} size="sm" />
+      )}
       <div className="relative min-w-0 flex-1">
         <textarea
           ref={textareaRef}
@@ -339,7 +341,7 @@ export function CommentInput({
                       : 'text-[var(--text-primary)] hover:bg-[var(--bg-surface)]',
                   )}
                 >
-                  <Avatar name={m.name} size="xs" />
+                  <Avatar name={m.name} imageUrl={m.avatarUrl} size="xs" />
                   <span className="flex-1 truncate">{m.name}</span>
                 </button>
               </li>

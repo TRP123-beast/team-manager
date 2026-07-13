@@ -678,7 +678,10 @@ export interface DataStore {
   // Team members
   inviteTeamMember: (input: { name: string; email: string; role: Role }) => Promise<TeamMember>
   removeTeamMember: (id: string) => Promise<void>
-  updateTeamMember: (id: string, patch: { name?: string }) => Promise<void>
+  updateTeamMember: (
+    id: string,
+    patch: { name?: string; avatarUrl?: string | null },
+  ) => Promise<void>
 
   // Tags
   createTag: (input: { name: string; color: string }) => Promise<Tag>

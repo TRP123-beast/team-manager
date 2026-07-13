@@ -187,12 +187,16 @@ export function TaskHeader({
 
         <Field label="Assignee">
           <div className="flex items-center gap-2">
-            {task.assigneeId && (
-              <Avatar
-                name={members.find((m) => m.id === task.assigneeId)?.name ?? 'Unknown'}
-                size="sm"
-              />
-            )}
+            {task.assigneeId && (() => {
+              const a = members.find((m) => m.id === task.assigneeId)
+              return (
+                <Avatar
+                  name={a?.name ?? 'Unknown'}
+                  imageUrl={a?.avatarUrl}
+                  size="sm"
+                />
+              )
+            })()}
             <select
               id="task-assignee-select"
               aria-label="Assignee"

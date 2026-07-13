@@ -262,7 +262,12 @@ export function TaskCard({
         </div>
 
         {assignee ? (
-          <Avatar name={assignee.name} size="sm" title={assignee.name} />
+          <Avatar
+            name={assignee.name}
+            imageUrl={assignee.avatarUrl}
+            size="sm"
+            title={assignee.name}
+          />
         ) : (
           // Ghost avatar — same circular footprint as the real Avatar so
           // the card baseline doesn't shift, with a dashed border and a

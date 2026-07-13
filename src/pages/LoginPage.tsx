@@ -538,7 +538,7 @@ function AtlasLogin({ members, loadingTeam, onSelect }: AtlasLoginProps) {
               if (!m) return null
               return (
                 <>
-                  <Avatar name={m.name} size="md" />
+                  <Avatar name={m.name} imageUrl={m.avatarUrl} size="md" />
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-[var(--text-primary)]">
                       {m.name}

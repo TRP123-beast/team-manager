@@ -251,7 +251,12 @@ function AssigneePicker({
   }, [open])
 
   const trigger = assignee ? (
-    <Avatar name={assignee.name} size="xs" title={assignee.name} />
+    <Avatar
+      name={assignee.name}
+      imageUrl={assignee.avatarUrl}
+      size="xs"
+      title={assignee.name}
+    />
   ) : (
     <span
       aria-hidden="true"
@@ -320,7 +325,7 @@ function AssigneePicker({
                 }}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-surface)]"
               >
-                <Avatar name={m.name} size="xs" />
+                <Avatar name={m.name} imageUrl={m.avatarUrl} size="xs" />
                 <span className="truncate">{m.name}</span>
                 {assignee?.id === m.id && (
                   <Check className="ml-auto h-3.5 w-3.5 text-[var(--accent-primary)]" />

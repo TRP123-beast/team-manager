@@ -81,6 +81,7 @@ export function ActivityItem({
       <CommentCard
         activity={activity}
         actorName={actorName}
+        actorAvatarUrl={actor?.avatarUrl ?? null}
         members={members}
       />
     )
@@ -97,7 +98,11 @@ export function ActivityItem({
         compact ? 'px-2 py-1.5' : 'px-3 py-2.5 md:px-4',
       )}
     >
-      <Avatar name={actorName} size={compact ? 'xs' : 'sm'} />
+      <Avatar
+        name={actorName}
+        imageUrl={actor?.avatarUrl}
+        size={compact ? 'xs' : 'sm'}
+      />
       <Icon
         className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]"
         aria-hidden="true"
@@ -159,17 +164,19 @@ function TimeStamp({ createdAt }: { createdAt: string }) {
 function CommentCard({
   activity,
   actorName,
+  actorAvatarUrl,
   members,
 }: {
   activity: Activity
   actorName: string
+  actorAvatarUrl: string | null
   members: TeamMember[]
 }) {
   return (
     <div className="ml-1 border-l-2 border-[var(--accent-primary)]/40 pl-3">
       <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 py-2.5 md:px-4">
         <div className="flex items-start gap-3">
-          <Avatar name={actorName} size="sm" />
+          <Avatar name={actorName} imageUrl={actorAvatarUrl} size="sm" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-baseline justify-between gap-x-2">
               <span className="text-sm font-medium text-[var(--text-primary)]">

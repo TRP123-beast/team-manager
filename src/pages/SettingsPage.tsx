@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
+import { useLocation } from 'react-router-dom'
 import { AccountSection } from '@/components/settings/AccountSection'
 import { ChangePasswordSection } from '@/components/settings/ChangePasswordSection'
 import { AtlasDataOverview } from '@/components/settings/AtlasDataOverview'
@@ -32,6 +33,19 @@ function SettingsCard({ children }: { children: ReactNode }) {
 export default function SettingsPage() {
   useDocumentTitle('Settings')
   const { isPM } = useAuth()
+  const location = useLocation()
+
+  // Deep-link support: `/settings#password` (from the top-bar menu) scrolls
+  // the change-password card into view. Delayed a frame so the section is
+  // mounted before we ask for its position.
+  useEffect(() => {
+    if (location.hash !== '#password') return
+    const t = window.setTimeout(() => {
+      const el = document.getElementById('password')
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 50)
+    return () => window.clearTimeout(t)
+  }, [location.hash])
   // Atlas Data Overview only renders content when the data source is
   // 'atlas'. We mirror that gating here so we don't render an empty
   // card or break the 2-col layout with a null child.
@@ -129,7 +143,9 @@ export default function SettingsPage() {
         <AccountSection />
       </SettingsCard>
       <SettingsCard>
-        <ChangePasswordSection />
+        <div id="password" className="scroll-mt-6">
+          <ChangePasswordSection />
+        </div>
       </SettingsCard>
     </div>
   )

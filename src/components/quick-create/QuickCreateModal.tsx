@@ -449,7 +449,7 @@ function AssigneePicker({
       >
         {value ? (
           <>
-            <Avatar name={value.name} size="xs" />
+            <Avatar name={value.name} imageUrl={value.avatarUrl} size="xs" />
             <span className="hidden sm:inline">{value.name.split(' ')[0]}</span>
           </>
         ) : (
@@ -495,7 +495,7 @@ function AssigneePicker({
                 }}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--text-primary)] hover:bg-[var(--bg-surface)]"
               >
-                <Avatar name={m.name} size="xs" />
+                <Avatar name={m.name} imageUrl={m.avatarUrl} size="xs" />
                 <span className="truncate">{m.name}</span>
               </button>
             </li>

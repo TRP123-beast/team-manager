@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { LogOut, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
-import { Avatar } from '@/components/shared/Avatar'
+import { ProfilePhotoSection } from '@/components/settings/ProfilePhotoSection'
 import { useAuth } from '@/data/auth'
 import { useData } from '@/data/store'
 import { clearOnboardingSeen } from '@/lib/onboarding'
@@ -58,17 +58,9 @@ export function AccountSection() {
       </p>
 
       <div className="mt-5 space-y-5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 md:p-5">
-        <div className="flex items-center gap-4">
-          <Avatar name={currentUser.name} size="lg" />
-          <div>
-            <p className="text-sm font-medium text-[var(--text-primary)]">Avatar</p>
-            <p className="text-xs text-[var(--text-muted)]">
-              Generated from your name. Upload coming soon.
-            </p>
-          </div>
-        </div>
+        <ProfilePhotoSection />
 
-        <div>
+        <div className="border-t border-[var(--border-subtle)] pt-5">
           <label
             htmlFor="account-name"
             className="block text-[11px] font-semibold uppercase tracking-[0.5px] text-[var(--text-secondary)]"

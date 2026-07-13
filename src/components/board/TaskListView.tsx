@@ -763,7 +763,7 @@ function AssigneeCell({
     <span className="inline-flex items-center gap-1.5 text-xs text-[var(--text-secondary)]">
       {assignee ? (
         <>
-          <Avatar name={assignee.name} size="xs" />
+          <Avatar name={assignee.name} imageUrl={assignee.avatarUrl} size="xs" />
           <span className="hidden truncate sm:inline">{assignee.name}</span>
         </>
       ) : (
@@ -832,7 +832,7 @@ function AssigneeCell({
                 'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-surface)]',
               )}
             >
-              <Avatar name={m.name} size="xs" />
+              <Avatar name={m.name} imageUrl={m.avatarUrl} size="xs" />
               <span className="truncate">{m.name}</span>
               {task.assigneeId === m.id && (
                 <Check className="ml-auto h-3.5 w-3.5 text-[var(--accent-primary)]" />

@@ -373,7 +373,7 @@ export function TeamMemberCard({
     >
       {/* Avatar — top-aligned with the name row. */}
       <div className="flex shrink-0 items-start">
-        <Avatar name={member.name} size="lg" />
+        <Avatar name={member.name} imageUrl={member.avatarUrl} size="lg" />
       </div>
 
       {/* Middle column distributes top stack (name/email/stats) vs the

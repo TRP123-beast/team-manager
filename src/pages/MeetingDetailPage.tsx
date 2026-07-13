@@ -577,7 +577,7 @@ function AttendeesRow({
             key={m.id}
             className="inline-flex h-7 items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-surface)] py-0.5 pl-0.5 pr-2 text-xs text-[var(--text-primary)]"
           >
-            <Avatar name={m.name} size="xs" />
+            <Avatar name={m.name} imageUrl={m.avatarUrl} size="xs" />
             <span className="truncate">{m.name}</span>
           </span>
         ))}
@@ -609,7 +609,7 @@ function AttendeesRow({
                         onClick={() => toggle(m.id)}
                         className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-surface)]"
                       >
-                        <Avatar name={m.name} size="xs" />
+                        <Avatar name={m.name} imageUrl={m.avatarUrl} size="xs" />
                         <span className="truncate">{m.name}</span>
                         {selected && (
                           <Check className="ml-auto h-3.5 w-3.5 text-[var(--accent-primary)]" />
@@ -900,7 +900,13 @@ function DecisionsSection({
                         </option>
                       ))}
                     </select>
-                    {decider && <Avatar name={decider.name} size="xs" />}
+                    {decider && (
+                      <Avatar
+                        name={decider.name}
+                        imageUrl={decider.avatarUrl}
+                        size="xs"
+                      />
+                    )}
                   </div>
                 </div>
                 {canEdit && (

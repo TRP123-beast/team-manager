@@ -484,7 +484,7 @@ function CommentCard({
       style={meta ? { borderLeftColor: meta.tone } : undefined}
     >
       <div className="flex items-start gap-3 px-3 py-2.5 md:px-4">
-        <Avatar name={authorName} size="sm" />
+        <Avatar name={authorName} imageUrl={author?.avatarUrl} size="sm" />
         <div className="min-w-0 flex-1">
           <header className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <span className="text-sm font-medium text-[var(--text-primary)]">

@@ -282,7 +282,7 @@ function AssigneeMenu({
                 close()
               }}
             >
-              <Avatar name={m.name} size="xs" />
+              <Avatar name={m.name} imageUrl={m.avatarUrl} size="xs" />
               <span className="truncate">{m.name}</span>
             </MenuRow>
           ))}
