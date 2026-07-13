@@ -41,6 +41,22 @@ export interface TeamMember {
   createdAt: string
 }
 
+/** Row shape of Supabase `user_profiles`. Only `auth-service.ts` reads/writes
+ *  this directly — the rest of the app consumes the mapped [[TeamMember]]. */
+export interface UserProfile {
+  id: string
+  display_name: string
+  email: string
+  role: Role
+  password_hash: string
+  avatar_url: string | null
+  avatar_initials: string | null
+  avatar_color: string | null
+  last_login_at: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface Project {
   id: string
   name: string

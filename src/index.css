@@ -242,6 +242,16 @@
   to   { transform: translateX(0); }
 }
 
+/* Wrong-password shake for the login form. Short horizontal jitter
+   with a translate reset so nothing drifts if it retriggers back-to-back. */
+@keyframes loginShake {
+  0%, 100% { transform: translateX(0); }
+  20%      { transform: translateX(-6px); }
+  40%      { transform: translateX(6px); }
+  60%      { transform: translateX(-4px); }
+  80%      { transform: translateX(4px); }
+}
+
 /* Slow "breath" used on empty-state illustrations — a 3 s in-and-out
    scale that signals life without distracting. Subtler than the
    built-in `animate-bounce`, kinder than `animate-pulse`'s opacity

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { AccountSection } from '@/components/settings/AccountSection'
+import { ChangePasswordSection } from '@/components/settings/ChangePasswordSection'
 import { AtlasDataOverview } from '@/components/settings/AtlasDataOverview'
 import { AtlasSection } from '@/components/settings/AtlasSection'
 import { SheetsSection } from '@/components/settings/SheetsSection'
@@ -126,6 +127,9 @@ export default function SettingsPage() {
       </SettingsCard>
       <SettingsCard>
         <AccountSection />
+      </SettingsCard>
+      <SettingsCard>
+        <ChangePasswordSection />
       </SettingsCard>
     </div>
   )
